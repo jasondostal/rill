@@ -22,6 +22,9 @@
 #   scripts/pii-guard.sh              # scan tracked files (working tree)
 #   scripts/pii-guard.sh --staged     # scan the index (use in pre-commit)
 #   scripts/pii-guard.sh --require-list   # fail if no denylist found (use in CI)
+#   scripts/pii-guard.sh --quiet      # withhold patterns + matched content from
+#                                     # output, print only file paths (use in CI:
+#                                     # Actions logs are world-readable when public)
 #
 # Denylist resolution (all that exist are merged, so a global list grows
 # across every repo while a repo adds its own specifics):
@@ -48,10 +51,12 @@ set -euo pipefail
 
 STAGED=0
 REQUIRE_LIST=0
+QUIET=0
 for arg in "$@"; do
   case "$arg" in
     --staged)       STAGED=1 ;;
     --require-list) REQUIRE_LIST=1 ;;
+    --quiet)        QUIET=1 ;;
     -h|--help)      sed -n '2,40p' "$0"; exit 0 ;;
     *) echo "pii-guard: unknown arg: $arg" >&2; exit 2 ;;
   esac
@@ -127,7 +132,7 @@ EXCLUDES=(':(exclude)*-lock.json' ':(exclude)*.sum' ':(exclude)*.pii-denylist*' 
 echo "pii-guard: scanning $SCOPE_DESC against $(printf '%s\n' "$PATTERNS" | wc -l | tr -d ' ') denylist pattern(s)"
 
 HITS=0
-TMP="$(mktemp)"; trap 'rm -f "$TMP"' EXIT
+TMP="$(mktemp)"; HITS_FILES="$(mktemp)"; trap 'rm -f "$TMP" "$HITS_FILES"' EXIT
 while IFS= read -r pat; do
   [ -z "$pat" ] && continue
   # 'cs:' prefix → case-sensitive; otherwise case-insensitive (-i).
@@ -137,9 +142,14 @@ while IFS= read -r pat; do
   if git grep "${GREP_ARGS[@]}" -e "$pat" -- . "${EXCLUDES[@]}" 2>/dev/null \
        | allow_filter > "$TMP"; then
     if [ -s "$TMP" ]; then
-      red "✗ denylist match: /$pat/i"
-      # Truncate long lines for readability.
-      sed 's/\(.\{160\}\).*/\1 …/' "$TMP" | sed 's/^/    /'
+      # --quiet (CI): never echo the pattern or the matched content — both reveal
+      # the denylist, and Actions logs are world-readable on a public repo. Only
+      # accumulate file paths for a safe summary. Verbose (local): show details.
+      if [ "$QUIET" -eq 0 ]; then
+        red "✗ denylist match: /$pat/"
+        sed 's/\(.\{160\}\).*/\1 …/' "$TMP" | sed 's/^/    /'  # truncate long lines
+      fi
+      cut -d: -f1 "$TMP" >> "$HITS_FILES"
       HITS=$((HITS + $(wc -l < "$TMP")))
     fi
   fi
@@ -160,8 +170,15 @@ fi
 
 echo
 if [ "$HITS" -gt 0 ]; then
-  red "✗ pii-guard: $HITS line(s) matched the denylist. Scrub before publishing."
-  echo "   False positive? Add a narrow pattern to .pii-allowlist (tracked, safe)."
+  if [ "$QUIET" -eq 1 ]; then
+    red "✗ pii-guard: $HITS line(s) matched the denylist, in these file(s):"
+    sort -u "$HITS_FILES" | sed 's/^/    /'
+    echo "   Patterns and matched lines are withheld here (this log may be public)."
+    echo "   Run 'scripts/pii-guard.sh' locally, with your denylist, to see details."
+  else
+    red "✗ pii-guard: $HITS line(s) matched the denylist. Scrub before publishing."
+    echo "   False positive? Add a narrow pattern to .pii-allowlist (tracked, safe)."
+  fi
   exit 1
 fi
 grn "✓ pii-guard: clean — no denylisted references in $SCOPE_DESC."

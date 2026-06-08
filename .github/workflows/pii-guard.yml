@@ -29,4 +29,6 @@ jobs:
           PII_GUARD_DENYLIST: ${{ runner.temp }}/pii-denylist
         run: |
           chmod +x scripts/pii-guard.sh
-          scripts/pii-guard.sh --require-list
+          # --quiet: withhold denylist patterns + matched content from the log,
+          # since Actions logs are world-readable once the repo is public.
+          scripts/pii-guard.sh --require-list --quiet
