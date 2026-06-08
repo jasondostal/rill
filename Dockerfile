@@ -8,7 +8,7 @@
 
 # Stage 1: build the SvelteKit SPA. Output lands in frontend/build/ as
 # static HTML + per-route shells + content-hashed _app/immutable/ chunks.
-FROM node:22-bookworm-slim@sha256:689c11043dad91472750cd824c97dd5e2318e9dd6f954e492fe7af0135d33ceb AS frontend-builder
+FROM node:26-bookworm-slim@sha256:79723b41edbedf595f62e943a9f8b0ba9af5b1e61045c5f8f59c2c02c1212a16 AS frontend-builder
 WORKDIR /app/frontend
 COPY frontend/package.json frontend/package-lock.json ./
 RUN npm ci
