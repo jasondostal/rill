@@ -1,0 +1,21 @@
+# pii-guard allowlist — intentional, reviewed matches that are OK to ship.
+#
+# ERE patterns matched against "file:line:content" hit lines; any match is
+# excluded from the scan. This file IS tracked (it only describes what's
+# allowed, never the sensitive list itself). Keep it tiny and justify each line.
+#
+# The maintainer's contact email is meant to be public (LICENSE / README).
+^LICENSE:.*@
+^README\.md:.*@
+
+# The Go module path / GitHub handle is the project's intended public identity
+# (import paths, go.mod, clone URL, ghcr image, CI badge, macOS bundle id).
+# This narrowly excludes the squashed handle only — "Jason Dostal" with a space
+# still flags via the surname pattern.
+jasondostal
+com\.jasondostal
+
+# The "Cairn" color preset is an intentional, kept homage — it's only a theme
+# name, meaningless to outsiders. Matches the preset definition in theme.js and
+# Theme.swift; bare "Cairn" anywhere else still flags.
+name: ['"]Cairn['"]

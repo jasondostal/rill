@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+.github
+
+# Secrets — never bake these into the image. .env.example is allowed so
+# the image's docs ship sane templates.
+.env
+.env.*
+!.env.example
+initial-admin-token
+*.pid
+
+# Frontend (built separately)
+frontend/node_modules
+frontend/.svelte-kit
+frontend/build
+
+# Data + replay artifacts — large, host-specific, and may contain user content
+data/
+data-snapshot-*/
+testdata/
+/tmp/
+*.log
+
+node_modules
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docs (not needed in image)
+docs/
+*.md

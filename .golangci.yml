@@ -1,0 +1,25 @@
+# golangci-lint configuration for Rill.
+# Run: golangci-lint run ./...
+
+linters:
+  enable:
+    - errcheck
+    - gosimple
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - misspell
+    - gofmt
+    - goimports
+
+linters-settings:
+  misspell:
+    locale: US
+  gofmt:
+    simplify: true
+
+issues:
+  exclude-use-default: false
+  max-issues-per-linter: 0
+  max-same-issues: 0

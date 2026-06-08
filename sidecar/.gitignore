@@ -1,0 +1,19 @@
+# Swift / SwiftPM
+.build/
+*.xcodeproj
+.swiftpm/
+
+# Built app bundle (produced by build.sh)
+RillSidecar.app/
+
+# Secrets / local config (token lives here; seeded from .zshrc)
+.env
+.env.*
+!.env.example
+
+# Archived prototype (the discarded SvelteKit+WKWebView attempt)
+_mimo-archive.tgz
+
+# OS
+.DS_Store
+Thumbs.db

@@ -1,0 +1,64 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <title>Rill</title>
+    <script>
+      // Pre-paint theme application — mirrors $lib/theme.js so the persisted
+      // OKLCH theme lands before first paint (no flash). Keep in sync with
+      // applyTheme()/PRESETS there.
+      (function () {
+        try {
+          var ok = function (l, c, h, a) {
+            var L = Math.max(0, Math.min(1, l)).toFixed(4),
+              C = Math.max(0, c).toFixed(4),
+              H = (((h % 360) + 360) % 360).toFixed(1);
+            return a == null ? 'oklch(' + L + ' ' + C + ' ' + H + ')'
+                             : 'oklch(' + L + ' ' + C + ' ' + H + ' / ' + a + ')';
+          };
+          var KIND = { decision: 85, preference: 330, insight: 195, procedure: 255, fact: 150, identity: 300, rule: 30 };
+          var ENT = { person: 25, project: 255, tool: 150, organization: 300, place: 85, preference: 330, concept: 195 };
+          var DEF = { mode: 'dark', bgL: 0.175, bgC: 0.018, catC: 0.16, hueShift: 0, bgH: 265, accentL: 0.70, accentC: 0.19, accentH: 255 };
+          var p = DEF;
+          try {
+            var stored = JSON.parse(localStorage.getItem('rill-prefs') || '{}').theme;
+            if (stored && typeof stored === 'object') { p = Object.assign({}, DEF, stored); }
+          } catch (e) {}
+          var root = document.documentElement, s = function (k, v) { root.style.setProperty(k, v); };
+          var light = p.mode === 'light', bgH = p.bgH, bgC = p.bgC;
+          if (light) {
+            s('--bg', ok(p.bgL, bgC * 0.6, bgH)); s('--surface', ok(Math.min(1, p.bgL + 0.03), bgC * 0.5, bgH));
+            s('--surface-2', ok(Math.min(1, p.bgL + 0.05), bgC * 0.5, bgH)); s('--surface-3', ok(p.bgL - 0.04, bgC * 0.7, bgH));
+            s('--border', ok(p.bgL - 0.10, bgC * 0.8, bgH)); s('--border-strong', ok(p.bgL - 0.22, bgC, bgH));
+            s('--text', ok(0.26, 0.02, bgH)); s('--text-dim', ok(0.44, 0.018, bgH)); s('--text-faint', ok(0.58, 0.016, bgH));
+          } else {
+            s('--bg', ok(p.bgL, bgC, bgH)); s('--surface', ok(p.bgL + 0.035, bgC, bgH));
+            s('--surface-2', ok(p.bgL + 0.065, bgC, bgH)); s('--surface-3', ok(p.bgL + 0.105, bgC * 1.1, bgH));
+            s('--border', ok(p.bgL + 0.095, bgC * 0.9, bgH)); s('--border-strong', ok(p.bgL + 0.185, bgC, bgH));
+            s('--text', ok(0.965, 0.007, bgH)); s('--text-dim', ok(0.745, 0.012, bgH)); s('--text-faint', ok(0.555, 0.016, bgH));
+          }
+          s('--accent', ok(p.accentL, p.accentC, p.accentH)); s('--accent-hi', ok(Math.min(0.92, p.accentL + 0.12), p.accentC * 0.9, p.accentH));
+          s('--accent-fg', ok(0.985, 0.012, p.accentH)); s('--accent-bg', ok(p.accentL, p.accentC, p.accentH, light ? 0.12 : 0.16));
+          s('--accent-line', ok(p.accentL, p.accentC, p.accentH, 0.35));
+          s('--destructive', ok(light ? 0.55 : 0.66, 0.20, 32)); s('--destructive-bg', ok(0.66, 0.20, 32, 0.16));
+          s('--warning', ok(light ? 0.62 : 0.80, 0.155, 80)); s('--warning-bg', ok(0.80, 0.155, 80, 0.16));
+          s('--success', ok(light ? 0.55 : 0.74, 0.15, 150)); s('--muted', ok(light ? 0.62 : 0.60, 0.012, bgH));
+          var catL = p.catL != null ? p.catL : (light ? 0.55 : 0.745), catC = p.catC;
+          var ap = function (pre, map) { for (var id in map) { var h = map[id] + p.hueShift;
+            s('--' + pre + '-' + id, ok(catL, catC, h)); s('--' + pre + '-' + id + '-bg', ok(catL, catC, h, light ? 0.13 : 0.16));
+            s('--' + pre + '-' + id + '-soft', ok(catL, catC, h, 0.30)); } };
+          ap('k', KIND); ap('e', ENT);
+          s('--shadow', light ? '0 1px 2px oklch(0 0 0 / 0.08), 0 8px 24px oklch(0 0 0 / 0.06)' : '0 1px 2px oklch(0 0 0 / 0.4), 0 16px 40px oklch(0 0 0 / 0.45)');
+          root.style.colorScheme = light ? 'light' : 'dark';
+          root.setAttribute('data-theme', light ? 'light' : 'dark');
+        } catch (e) {}
+      })();
+    </script>
+    %sveltekit.head%
+  </head>
+  <body>
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
+</html>

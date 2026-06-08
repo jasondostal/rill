@@ -1,0 +1,81 @@
+services:
+  # SurrealDB ships with a distroless image running as uid 65532. The named
+  # volume is created by docker as root:root, so SurrealDB can't write on
+  # first start and crashes with "Permission denied". This init service
+  # runs once as root, chowns the volume to 65532, and exits. Idempotent —
+  # subsequent starts are no-ops. Stays on a tiny base so it doesn't add
+  # meaningful image weight.
+  surrealdb-init:
+    image: alpine:3.21
+    user: "0:0"
+    command:
+      - sh
+      - -c
+      - "chown -R 65532:65532 /data && chmod 750 /data"
+    volumes:
+      - surreal_data:/data
+    restart: "no"
+
+  surrealdb:
+    image: surrealdb/surrealdb:v3.0.5
+    # Bind to loopback only. Rill talks to SurrealDB over the compose network
+    # via the "surrealdb" service hostname, so 0.0.0.0 exposure was unnecessary
+    # and let anyone on the LAN open a websocket to the root account.
+    ports:
+      - "127.0.0.1:8000:8000"
+    restart: unless-stopped
+    # Memory: SurrealDB holds the HNSW vector index in RAM plus a working set of
+    # query results. 4 GB is comfortable for a corpus on the order of 10k blobs;
+    # tune upward as the corpus grows. Soft-limit by env to make it easy to
+    # raise without editing this file.
+    mem_limit: ${SURREAL_MEM_LIMIT:-4g}
+    mem_reservation: ${SURREAL_MEM_RESERVATION:-1g}
+    command:
+      - start
+      - --log
+      - trace
+      - --user
+      - ${SURREAL_USER:?SURREAL_USER must be set}
+      - --pass
+      - ${SURREAL_PASS:?SURREAL_PASS must be set}
+      - surrealkv://data
+    volumes:
+      - surreal_data:/data
+    healthcheck:
+      test: ["CMD", "/surreal", "is-ready", "--endpoint", "ws://localhost:8000"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    depends_on:
+      surrealdb-init:
+        condition: service_completed_successfully
+
+  rill:
+    build: .
+    # Default sub-command "serve" comes from Dockerfile CMD; no override needed.
+    # SWAG fronts rill on the host, so bind to loopback only — no public LAN
+    # exposure on the rill port itself.
+    ports:
+      - "127.0.0.1:${RILL_PORT:-9090}:8080"
+    restart: unless-stopped
+    # Memory: rill itself is fairly lean (Go runtime + small caches), but the
+    # extraction sweep can hold multiple in-flight LLM response buffers. 1 GB
+    # is comfortable; bump if the sweep concurrency goes higher.
+    mem_limit: ${RILL_MEM_LIMIT:-1g}
+    mem_reservation: ${RILL_MEM_RESERVATION:-256m}
+    environment:
+      - RILL_PORT=8080
+      - RILL_AUTH_MODE=${RILL_AUTH_MODE:-local}
+      - RILL_DATA_DIR=/var/lib/rill
+      - SURREAL_URL=ws://surrealdb:8000
+      - SURREAL_USER=${SURREAL_USER:?SURREAL_USER must be set}
+      - SURREAL_PASS=${SURREAL_PASS:?SURREAL_PASS must be set}
+    volumes:
+      - rill_data:/var/lib/rill
+    depends_on:
+      surrealdb:
+        condition: service_healthy
+
+volumes:
+  surreal_data:
+  rill_data:

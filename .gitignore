@@ -1,0 +1,151 @@
+# Dev-only files (local configuration, plans, lab context)
+PLAN.md
+docs/tasks.json
+
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/rill
+/rill.exe
+/replay
+/eval
+rill_binary
+cmd/rill/rill
+cmd/eval/eval
+
+# Test binary
+*.test
+
+# Go workspace
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+.svelte-kit/
+frontend/.svelte-kit/
+frontend/build/
+
+# Embedded SvelteKit bundle. Only the placeholder index.html is committed;
+# Docker overwrites the directory with the real build during the image build,
+# and local devs can copy frontend/build/* over the placeholder to test
+# the embedded path against `go build`.
+internal/server/webui/*
+!internal/server/webui/index.html
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+*.log
+
+# Playwright
+/test-results/
+/playwright-report/
+/playwright/.cache/
+
+# Docker (dev)
+docker-compose.override.yml
+
+# SurrealDB data (local dev)
+data/
+data-snapshot*/
+*.db
+history.txt
+
+# Local-only deployment artifacts and machine-named files
+*.local.*
+lab/
+scripts/*.sh
+# ...but the PII guard is a shippable, reusable tool — keep it tracked.
+!scripts/pii-guard.sh
+migrate
+/migrate
+rill-darwin-arm64
+/rill-darwin-arm64
+rill-macos-*
+/rill-macos-amd64
+/rill-macos-arm64
+
+# Local exec-plans (in-flight planning that isn't ready for the public repo)
+docs/exec-plans/active/intentional-memory/
+
+# Local agent + loop signal files
+.pi/
+.escalate
+.complete
+.ready
+.stop
+
+# Test corpus / evaluation data generated locally — may contain operator
+# memories, project names, infra details. Regenerate locally; do not commit.
+testdata/*-corpus/
+testdata/*-pilot/
+testdata/*-r[0-9]/
+testdata/*-export-*.json
+
+# Eval run artifacts: per-run corpus subsets are regenerated each run.
+docs/exec-plans/active/extraction-quality/runs/*/corpus_subset.json
+
+# Property-test failure repros (auto-generated, per-run)
+internal/**/testdata/rapid/
+
+# Bootstrap admin token written by rill serve on first boot — secret, ephemeral.
+initial-admin-token
+
+# Local-only docs — operator-specific notes, kept on disk, never committed.
+docs/exec-plans/active/extraction-quality/runs/
+docs/exec-plans/active/extraction-quality/inspiration.md
+docs/exec-plans/active/extraction-quality/eval-dataset.json
+docs/exec-plans/completed/OIDC_AND_WRAPUP.md
+docs/exec-plans/completed/OPUS_REVIEW_FIXES.md
+docs/primer-spec/
+docs/primer/
+docs/product-specs/
+docs/reviews/
+docs/ROUGH_EDGES.md
+docs/exec-plans/active/proxy-header-auth-bypass/
+testdata/eval/
+
+# Claude Code agent worktree management
+.claude/
+
+# Bootstrap admin token (per-deploy, gitignored already, but .v* backups too)
+initial-admin-token.*
+
+# Research / competitive analysis notes — kept local, not shared.
+research/
+
+# pii-guard: the real denylist is a PII index — it must NEVER be tracked.
+# Only .pii-denylist.sample (the format reference) is committed.
+.pii-denylist
+pii-denylist
+
+# Archives are opaque to the text PII guard — never commit them.
+*.zip
+*.tar
+*.tgz
+*.tar.gz
