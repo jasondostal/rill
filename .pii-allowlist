@@ -4,8 +4,10 @@
 # excluded from the scan. This file IS tracked (it only describes what's
 # allowed, never the sensitive list itself). Keep it tiny and justify each line.
 #
-# The maintainer's contact email is meant to be public (LICENSE / README).
-^LICENSE:.*@
+# The LICENSE file is intentionally public boilerplate + the maintainer's name
+# in the copyright line; allow the whole file. The contact email in the README
+# is also meant to be public.
+^LICENSE:
 ^README\.md:.*@
 
 # The Go module path / GitHub handle is the project's intended public identity

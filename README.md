@@ -6,7 +6,7 @@
 
 [![CI](https://github.com/jasondostal/rill/actions/workflows/ci.yml/badge.svg)](https://github.com/jasondostal/rill/actions/workflows/ci.yml)
 [![Go 1.26](https://img.shields.io/badge/Go-1.26-00ADD8?logo=go)](https://go.dev/)
-[![License](https://img.shields.io/badge/license-TBD-blue)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 
 Rill gives your agents a memory that survives between sessions — one place for the things worth remembering, the entities they're about, and how everything connects. Stand it up with a single Go binary and one database, point any MCP client at it, and browse it all in a fast dark-first web UI.
 
@@ -118,4 +118,4 @@ Under the hood, Rill stores each memory alongside the entities it mentions and l
 
 ## License
 
-TBD
+MIT — see [LICENSE](LICENSE).
