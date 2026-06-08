@@ -109,7 +109,7 @@ jobs:
           format: sarif
           output: trivy-fs.sarif
           severity: HIGH,CRITICAL
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         # SARIF upload requires GitHub Advanced Security on private repos.
         # Without GHAS the upload returns "Resource not accessible" and
         # fails the job. Make it non-blocking — the Trivy scan still runs
@@ -152,7 +152,7 @@ jobs:
           format: sarif
           output: trivy-image.sarif
           severity: HIGH,CRITICAL
-      - uses: github/codeql-action/upload-sarif@v3
+      - uses: github/codeql-action/upload-sarif@v4
         # Non-blocking — see note on the trivy-fs job above.
         if: always()
         continue-on-error: true
