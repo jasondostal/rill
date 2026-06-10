@@ -383,8 +383,9 @@ func (h *restHandler) handleDemote(w http.ResponseWriter, r *http.Request) {
 }
 
 type mergeEntityReq struct {
-	Target string `json:"target"` // surviving entity: bare name (same type) or full record id
-	Author string `json:"author,omitempty"`
+	Target         string `json:"target"` // surviving entity: bare name (same type) or full record id
+	Author         string `json:"author,omitempty"`
+	AllowCrossType bool   `json:"allow_cross_type,omitempty"` // target must be a full record id
 }
 
 // handleMergeEntity folds the path entity (source) into the body's target.
@@ -417,7 +418,7 @@ func (h *restHandler) handleMergeEntity(w http.ResponseWriter, r *http.Request) 
 	if author == "" {
 		author = authorFromContext(r)
 	}
-	res, err := h.memStore.MergeEntity(r.Context(), slug, req.Target, typ, author)
+	res, err := h.memStore.MergeEntity(r.Context(), slug, req.Target, typ, author, req.AllowCrossType)
 	if err != nil {
 		if errors.Is(err, memory.ErrInvalidPayload) {
 			writeBadRequest(w, err.Error())

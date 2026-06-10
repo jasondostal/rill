@@ -16,10 +16,12 @@ type existingEntity struct {
 	Promoted     bool     `json:"promoted"`
 	HandNotes    string   `json:"hand_notes"`
 	DerivedCard  string   `json:"derived_card"`
+	IsMerged     bool     `json:"is_merged"`
+	MergedInto   string   `json:"merged_into_id"`
 }
 
 func (s *Store) fetchEntity(ctx context.Context, recID string) (*existingEntity, error) {
-	stmt := fmt.Sprintf(`SELECT id, name, aliases, summary, mention_count, promoted, hand_notes, derived_card FROM %s;`, recID)
+	stmt := fmt.Sprintf(`SELECT id, name, aliases, summary, mention_count, promoted, hand_notes, derived_card, (merged_into IS NOT NONE) AS is_merged, merged_into.id AS merged_into_id FROM %s;`, recID)
 	res, err := s.db.SQL(ctx, stmt, true)
 	if err != nil {
 		return nil, err

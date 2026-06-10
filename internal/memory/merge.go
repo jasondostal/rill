@@ -54,7 +54,11 @@ func recordTable(recID string) string {
 	return ""
 }
 
-// MergeEntity folds source into target. Both must be the same entity type.
+// MergeEntity folds source into target. Same-type by default; allowCrossType
+// permits merging across entity types for the common real-world dupe where the
+// SAME thing was recorded under two types (tool:fsevents vs concept:fsevents).
+// Cross-type refs must be full record ids — a single `typ` can't resolve two
+// bare names to different tables.
 //
 // Active edges and mentions on source are re-created on target — typed edges
 // flow through writeEdge so they pick up the same dedup + exclusive-predicate
@@ -66,7 +70,7 @@ func recordTable(recID string) string {
 // never deleted, and reversible.
 //
 // Requires admin scope at the tool layer (structural mutation).
-func (s *Store) MergeEntity(ctx context.Context, sourceRef, targetRef string, typ EntityType, author string) (*MergeResult, error) {
+func (s *Store) MergeEntity(ctx context.Context, sourceRef, targetRef string, typ EntityType, author string, allowCrossType bool) (*MergeResult, error) {
 	srcID, err := s.resolveEntityRef(ctx, sourceRef, typ)
 	if err != nil {
 		return nil, err
@@ -81,8 +85,8 @@ func (s *Store) MergeEntity(ctx context.Context, sourceRef, targetRef string, ty
 	if srcID == tgtID {
 		return nil, errs("cannot merge an entity into itself")
 	}
-	if recordTable(srcID) != recordTable(tgtID) {
-		return nil, errs("can only merge entities of the same type (%s vs %s)", recordTable(srcID), recordTable(tgtID))
+	if recordTable(srcID) != recordTable(tgtID) && !allowCrossType {
+		return nil, errs("source and target are different types (%s vs %s) — if they are genuinely the SAME thing recorded under two types, retry with allow_cross_type:true and full record ids", recordTable(srcID), recordTable(tgtID))
 	}
 
 	src, err := s.fetchMergeRow(ctx, srcID)

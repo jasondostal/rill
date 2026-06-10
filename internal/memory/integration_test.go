@@ -640,7 +640,7 @@ func TestMergeEntity_FoldsSourceIntoTarget(t *testing.T) {
 		t.Fatalf("seed source: %v", err)
 	}
 
-	res, err := s.MergeEntity(ctx, "Kimi K2.6", "Kimi", EntityTool, "test")
+	res, err := s.MergeEntity(ctx, "Kimi K2.6", "Kimi", EntityTool, "test", false)
 	if err != nil {
 		t.Fatalf("merge: %v", err)
 	}
@@ -684,7 +684,7 @@ func TestMergeEntity_FoldsSourceIntoTarget(t *testing.T) {
 	}
 
 	// Merging into self must be rejected.
-	if _, err := s.MergeEntity(ctx, "Kimi", "Kimi", EntityTool, "test"); err == nil {
+	if _, err := s.MergeEntity(ctx, "Kimi", "Kimi", EntityTool, "test", false); err == nil {
 		t.Errorf("expected error merging an entity into itself")
 	}
 }
@@ -745,5 +745,116 @@ func TestSetVersion_BitemporalSupersession(t *testing.T) {
 	}
 	if v, _ := s.CurrentVersion(ctx, "tool:gemma_4_26b_a4b"); v != "4" {
 		t.Errorf("gemma version = %q, want 4", v)
+	}
+}
+
+// TestMergeEntity_CrossType verifies the cross-type merge path: blocked by
+// default with a teaching error, permitted with allowCrossType (full record
+// ids), edges + mentions re-pointed onto the other-type survivor, and the
+// retired tombstone redirects future remember() declarations instead of
+// silently absorbing them.
+func TestMergeEntity_CrossType(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	// The classic dupe: the same thing minted under two types. force_new is
+	// required to seed the dupe at all now that the cross-type guard exists.
+	if _, err := s.Remember(ctx, RememberPayload{
+		Summary: "Widget is a project Alice works on.",
+		Kind:    "fact", Author: "test",
+		Entities: []EntityDecl{{Name: "Alice", Type: EntityPerson}, {Name: "Widget", Type: EntityProject}},
+		Edges:    []EdgeDecl{{Subject: "Alice", SubjectType: EntityPerson, Predicate: "works_on", Object: "Widget", ObjectType: EntityProject}},
+	}); err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	if _, err := s.Remember(ctx, RememberPayload{
+		Summary: "Widget is used by the Beta project.",
+		Kind:    "fact", Author: "test",
+		Entities: []EntityDecl{{Name: "Beta", Type: EntityProject}, {Name: "Widget", Type: EntityTool, ForceNew: true}},
+		Edges:    []EdgeDecl{{Subject: "Beta", SubjectType: EntityProject, Predicate: "uses", Object: "Widget", ObjectType: EntityTool}},
+	}); err != nil {
+		t.Fatalf("seed tool dupe: %v", err)
+	}
+
+	// Without the flag: refused, and the error teaches the override.
+	if _, err := s.MergeEntity(ctx, "tool:widget", "project:widget", "", "test", false); err == nil {
+		t.Fatal("expected cross-type merge to be blocked without allow_cross_type")
+	} else if !strings.Contains(err.Error(), "allow_cross_type") {
+		t.Errorf("blocked-merge error should teach the override, got: %v", err)
+	}
+
+	// With the flag: edges + mentions move onto the project survivor.
+	res, err := s.MergeEntity(ctx, "tool:widget", "project:widget", "", "test", true)
+	if err != nil {
+		t.Fatalf("cross-type merge: %v", err)
+	}
+	if res.EdgesMoved < 1 {
+		t.Errorf("expected >=1 edge moved, got %d", res.EdgesMoved)
+	}
+	if res.MentionsMoved < 1 {
+		t.Errorf("expected >=1 mention moved, got %d", res.MentionsMoved)
+	}
+	tgt, err := s.GetEntity(ctx, "Widget", EntityProject)
+	if err != nil || tgt == nil {
+		t.Fatalf("get survivor: %v", err)
+	}
+	usesOntoSurvivor := false
+	for _, e := range tgt.Edges {
+		if e.Predicate == "uses" && e.Active {
+			usesOntoSurvivor = true
+		}
+	}
+	if !usesOntoSurvivor {
+		t.Errorf("re-pointed cross-type uses edge missing on survivor: %+v", tgt.Edges)
+	}
+
+	// The tombstone must not silently absorb future declarations.
+	_, err = s.Remember(ctx, RememberPayload{
+		Summary: "Widget got a new release.",
+		Kind:    "fact", Author: "test",
+		Entities: []EntityDecl{{Name: "Widget", Type: EntityTool}},
+	})
+	if err == nil {
+		t.Fatal("expected redeclaring the merged tool:widget to be rejected")
+	}
+	if !strings.Contains(err.Error(), "merged into") {
+		t.Errorf("tombstone error should name the merge, got: %v", err)
+	}
+}
+
+// TestRemember_CrossTypeExactNameBlock verifies the write-time guard: an exact
+// name that already exists under a different type is soft-blocked with the
+// candidate named, and force_new lets a genuine homonym through.
+func TestRemember_CrossTypeExactNameBlock(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.Remember(ctx, RememberPayload{
+		Summary: "Mercury is a planet-scanning tool.",
+		Kind:    "fact", Author: "test",
+		Entities: []EntityDecl{{Name: "Mercury", Type: EntityTool}},
+	}); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	_, err := s.Remember(ctx, RememberPayload{
+		Summary: "Mercury is a concept in alchemy.",
+		Kind:    "fact", Author: "test",
+		Entities: []EntityDecl{{Name: "Mercury", Type: EntityConcept}},
+	})
+	if err == nil {
+		t.Fatal("expected cross-type exact-name declaration to be rejected")
+	}
+	if !strings.Contains(err.Error(), "tool:mercury") {
+		t.Errorf("error should name the existing candidate, got: %v", err)
+	}
+
+	// force_new overrides for a genuine homonym.
+	if _, err := s.Remember(ctx, RememberPayload{
+		Summary: "Mercury is also a Roman god.",
+		Kind:    "fact", Author: "test",
+		Entities: []EntityDecl{{Name: "Mercury", Type: EntityPerson, ForceNew: true}},
+	}); err != nil {
+		t.Fatalf("force_new homonym should be allowed: %v", err)
 	}
 }

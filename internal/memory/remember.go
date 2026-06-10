@@ -312,6 +312,17 @@ func (s *Store) planUpsertEntity(ctx context.Context, e EntityDecl, author strin
 		return nil, nil, "", err
 	}
 	if existing != nil {
+		// A merged entity is a tombstone — bumping it would resurrect a node
+		// that was deliberately retired. Point the caller at the survivor.
+		if existing.IsMerged {
+			survivor := existing.MergedInto
+			if survivor == "" {
+				survivor = "another entity"
+			}
+			return nil, nil, "", errs(
+				"%s %q is retired — it was merged into %s. Declare the survivor (its name and type) instead.",
+				e.Type, e.Name, survivor)
+		}
 		ref, stmt := planBumpEntity(existing, e, author, txTime, eventTime)
 		return ref, nil, stmt, nil
 	}
@@ -334,12 +345,37 @@ func (s *Store) planUpsertEntity(ctx context.Context, e EntityDecl, author strin
 			if ferr != nil || full == nil {
 				break // fall through to normal creation rather than fail the write
 			}
+			if full.IsMerged {
+				continue // retired tombstone — its survivor carries this alias too
+			}
 			ref, stmt := planBumpEntity(full, e, author, txTime, eventTime)
 			return ref, nil, stmt, nil
 		}
 	}
 
-	// 2b) Lexical variant soft-block: a name that looks like an alternate form
+	// 2b) Cross-type exact-slug soft-block: the same name already existing
+	// under a DIFFERENT type is almost always the same thing mistyped (tool vs
+	// concept, project vs tool) — the dupe class none of the same-type checks
+	// can see. Six point reads, best-effort (a read error never blocks the
+	// write). force_new overrides for genuine homonyms.
+	if !e.ForceNew {
+		for _, other := range ValidEntityTypes {
+			if other == e.Type {
+				continue
+			}
+			peer, perr := s.fetchEntity(ctx, entityRecID(other, e.Name))
+			if perr != nil || peer == nil || peer.IsMerged {
+				continue
+			}
+			return nil, nil, "", errs(
+				"%q already exists as a %s (%s). If it's the SAME thing, declare it with type:%s; "+
+					"if the two types should become one node, call merge_entity with allow_cross_type:true; "+
+					"if it's genuinely a different thing sharing the name, set force_new:true on this entity.",
+				e.Name, other, peer.ID, other)
+		}
+	}
+
+	// 2c) Lexical variant soft-block: a name that looks like an alternate form
 	// of an existing same-type entity (shared distinctive token, not a
 	// specialization sibling) is rejected so the caller reuses/merges instead
 	// of duplicating. Overridable per-entity via force_new.

@@ -33,7 +33,7 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 			"type": "object",
 			"properties": map[string]any{
 				"summary": map[string]any{"type": "string", "description": "ONE atomic fact-bearing claim — aim for ~3-4 sentences (~600 chars). Embedded for vector recall, so write the claim, not the narration. Overflow auto-spills into details (no error), so don't pad or truncate to hit a length."},
-				"details": map[string]any{"type": "string", "description": "Optional narrative context. FTS-indexed but not embedded."},
+				"details": map[string]any{"type": "string", "description": "Optional narrative context. FTS-indexed but not embedded. Write durable claims: if you must record in-flight state (an open TODO, a 'NOT yet X', a remaining-steps plan), date-stamp it ('as of YYYY-MM-DD') and expect a later edit_memory to close it out when it resolves — undated open-items rot into false claims."},
 				"kind":    map[string]any{"type": "string", "description": "decision | preference | insight | procedure | fact | identity | rule | idea"},
 				"tags":    map[string]any{"type": "array", "items": map[string]any{"type": "string"}},
 				"author":  map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
@@ -41,7 +41,7 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 				"valence": map[string]any{"type": "string", "description": "positive | negative | neutral (only for kind=preference)"},
 				"entities": map[string]any{
 					"type":        "array",
-					"description": "The entities this claim is about — declare ALL of them; this is how the memory enriches the graph. Each: {name, type, aliases?, summary?, force_new?}. Type ∈ person|project|tool|organization|place|preference|concept. Reuse existing entities, and CREATE new ones freely for genuinely new things. DEDUP: exact name AND known aliases fold into the existing node automatically (so check the graph and prefer an existing entity's canonical name). A name that looks like an alternate FORM of an existing same-type entity (e.g. 'Acme CU' when 'Acme Communities Credit Union' exists) is REJECTED with the candidate named — reuse that name, or merge_entity, or set force_new:true on this one entity if it's genuinely distinct. Specializations (e.g. 'Rill Sidecar' alongside 'rill') are allowed through.",
+					"description": "The entities this claim is about — declare ALL of them; this is how the memory enriches the graph. Each: {name, type, aliases?, summary?, force_new?}. Type ∈ person|project|tool|organization|place|preference|concept. Reuse existing entities, and CREATE new ones freely for genuinely new things. DEDUP: exact name AND known aliases fold into the existing node automatically (so check the graph and prefer an existing entity's canonical name). A name that looks like an alternate FORM of an existing same-type entity (e.g. 'Acme CU' when 'Acme Communities Credit Union' exists) is REJECTED with the candidate named — reuse that name, or merge_entity, or set force_new:true on this one entity if it's genuinely distinct. An exact name match under a DIFFERENT type is also rejected (the same thing recorded under two types is the most common real dupe) — reuse the existing node's type, or force_new:true for a genuine homonym. Specializations (e.g. 'Rill Sidecar' alongside 'rill') are allowed through.",
 					"items":       map[string]any{"type": "object"},
 				},
 				"edges": map[string]any{
@@ -160,7 +160,7 @@ func NewEditNotesTool(s *memory.Store) *EditNotesTool { return &EditNotesTool{st
 func (t *EditNotesTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "edit_notes",
-		Description:    "Edit an entity's hand_notes (the free-form human-curated section). This is NOT the system-rendered derived_card (truncated). Use this to discover what is in the graph before writing a remember() — the cheapest way to see the current state. Sort: mention_count (default), recent, or name.",
+		Description:    "Edit an entity's hand_notes — the free-form human-curated section that renders on the entity card alongside (not inside) the system-rendered derived_card. Use it for standing context about the entity that no single memory carries.",
 		RequiredScopes: []string{"write"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -207,7 +207,7 @@ func NewAddEdgeTool(s *memory.Store) *AddEdgeTool { return &AddEdgeTool{store: s
 func (t *AddEdgeTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "add_edge",
-		Description:    "Add a single relationship edge between two existing entities (no memory written). Both endpoints must already exist — declare them via remember() first if needed. Recomputes derived_card (truncated). Use this to discover what is in the graph before writing a remember() — the cheapest way to see the current state. Sort: mention_count (default), recent, or name.",
+		Description:    "Add a single relationship edge between two existing entities (no memory written). Both endpoints must already exist — declare them via remember() first if needed. Recomputes both entities' derived cards.",
 		RequiredScopes: []string{"write"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -245,7 +245,7 @@ func NewCloseEdgeTool(s *memory.Store) *CloseEdgeTool { return &CloseEdgeTool{st
 func (t *CloseEdgeTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "close_edge",
-		Description:    "Soft-close an active edge (sets valid_until = now). Provenance is preserved; the edge stays in the DB as inactive. Recomputes derived_card (truncated). Use this to discover what is in the graph before writing a remember() — the cheapest way to see the current state. Sort: mention_count (default), recent, or name.",
+		Description:    "Soft-close an active edge (sets valid_until = now). Provenance is preserved; the edge stays in the DB as inactive history. Use when a relationship has ENDED (left a job, stopped using a tool) — bi-temporal closure, not deletion. Recomputes the affected derived cards.",
 		RequiredScopes: []string{"write"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -408,7 +408,7 @@ func NewGetEntityTool(s *memory.Store) *GetEntityTool { return &GetEntityTool{st
 func (t *GetEntityTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "get_entity",
-		Description:    "Fetch one entity's full state: header fields, hand_notes (human-curated), derived_card (truncated). Use this to discover what is in the graph before writing a remember() — the cheapest way to see the current state. Sort: mention_count (default), recent, or name.",
+		Description:    "Fetch one entity's full state: header fields, hand_notes (human-curated), derived_card, mentions, and edges. Use this to see what the graph already knows about an entity before writing a remember() about it.",
 		RequiredScopes: []string{"read"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -529,7 +529,7 @@ func NewEditMemoryTool(s *memory.Store) *EditMemoryTool { return &EditMemoryTool
 func (t *EditMemoryTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "edit_memory",
-		Description:    "Patch mutable fields on an existing memory (summary, details, tags, valence, project, pinned). Re-embeds the summary if changed. Recomputes derived_card on every entity the memory mentions. IMMUTABLE: id, kind, author, created_at (use forget + remember to change those). Author required for audit.",
+		Description:    "Patch mutable fields on an existing memory (summary, details, tags, valence, project, pinned). Re-embeds the summary if changed. Recomputes derived_card on every entity the memory mentions. IMMUTABLE: id, kind, author, created_at (use forget + remember to change those). Author required for audit. CURATION DUTY: when you READ a memory and can see a claim has gone stale (a 'NOT yet' that since happened, a TODO that's done, a plan that was executed), edit it closed right then — mark resolved items resolved, keep the durable lesson, and leave the memory better than you found it.",
 		RequiredScopes: []string{"write"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -625,7 +625,7 @@ func NewMergeEntityTool(s *memory.Store) *MergeEntityTool { return &MergeEntityT
 func (t *MergeEntityTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:        "merge_entity",
-		Description: "Merge one entity into another of the same type. Re-points every edge + mention from `source` onto `target` (reusing dedup + exclusive-predicate consolidation), folds source's name/aliases/hand_notes into target, sums mention_count, and soft-retires source via merged_into (archived, reversible — not deleted). Use when the graph has a duplicate or a version-suffixed variant that should be a single node (e.g. 'Kimi K2.6' into 'Kimi'). Reversible graph-curation op.",
+		Description: "Merge one duplicate entity into another. Re-points every edge + mention from `source` onto `target` (reusing dedup + exclusive-predicate consolidation), folds source's name/aliases/hand_notes into target, sums mention_count, and soft-retires source via merged_into (archived, reversible — not deleted). Use when the graph has a duplicate or a version-suffixed variant that should be a single node (e.g. 'Kimi K2.6' into 'Kimi'). Same-type by default; when the SAME thing was recorded under two different types (e.g. tool:fsevents vs concept:fsevents — the most common real dupe), set allow_cross_type:true and pass BOTH refs as full record ids. Reversible graph-curation op.",
 		// Reversible (source archived via merged_into, not deleted) — write scope.
 		RequiredScopes: []string{"write"},
 		InputSchema: map[string]any{
@@ -635,6 +635,7 @@ func (t *MergeEntityTool) Definition() mcp.ToolDefinition {
 				"target": map[string]any{"type": "string", "description": "Surviving entity — full record id (e.g. 'tool:kimi') or bare name."},
 				"type":   map[string]any{"type": "string", "description": "Entity type (person|project|tool|organization|place|preference|concept), required when source/target are bare names."},
 				"author": map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
+				"allow_cross_type": map[string]any{"type": "boolean", "description": "Permit merging across entity types — only when source and target are genuinely the SAME thing recorded under two types. Both refs must be full record ids. Default false."},
 			},
 			"required": []string{"source", "target", "author"},
 		},
@@ -643,10 +644,11 @@ func (t *MergeEntityTool) Definition() mcp.ToolDefinition {
 
 func (t *MergeEntityTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
 	var a struct {
-		Source string `json:"source"`
-		Target string `json:"target"`
-		Type   string `json:"type"`
-		Author string `json:"author"`
+		Source         string `json:"source"`
+		Target         string `json:"target"`
+		Type           string `json:"type"`
+		Author         string `json:"author"`
+		AllowCrossType bool   `json:"allow_cross_type"`
 	}
 	if err := json.Unmarshal(params, &a); err != nil {
 		return nil, fmt.Errorf("%w: invalid merge_entity params: %s", mcp.ErrUserFacing, err)
@@ -654,7 +656,7 @@ func (t *MergeEntityTool) Call(ctx context.Context, params json.RawMessage) (any
 	if a.Author == "" {
 		a.Author = "claude"
 	}
-	res, err := t.store.MergeEntity(ctx, a.Source, a.Target, memory.EntityType(a.Type), a.Author)
+	res, err := t.store.MergeEntity(ctx, a.Source, a.Target, memory.EntityType(a.Type), a.Author, a.AllowCrossType)
 	return res, asUserFacing(err)
 }
 
