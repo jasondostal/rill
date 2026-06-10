@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/jasondostal/rill/internal/mcp"
@@ -62,6 +63,24 @@ func (t *RememberTool) Call(ctx context.Context, params json.RawMessage) (any, e
 	}
 	res, err := t.store.Remember(ctx, p)
 	return res, asUserFacing(err)
+}
+
+// flexBool is a bool that also accepts the string forms MCP clients commonly
+// send ("true"/"false"/"1"/"0") — connectors with a stale cached tool schema
+// serialize unknown boolean params as strings, and rejecting those turns a
+// schema-cache lag into a hard tool failure.
+type flexBool bool
+
+func (b *flexBool) UnmarshalJSON(data []byte) error {
+	switch strings.ToLower(strings.Trim(string(data), `"`)) {
+	case "true", "1":
+		*b = true
+	case "false", "0", "", "null":
+		*b = false
+	default:
+		return fmt.Errorf("invalid boolean value %s", string(data))
+	}
+	return nil
 }
 
 // asUserFacing surfaces payload/validation errors (memory.ErrInvalidPayload) to
@@ -648,7 +667,7 @@ func (t *MergeEntityTool) Call(ctx context.Context, params json.RawMessage) (any
 		Target         string `json:"target"`
 		Type           string `json:"type"`
 		Author         string `json:"author"`
-		AllowCrossType bool   `json:"allow_cross_type"`
+		AllowCrossType flexBool `json:"allow_cross_type"`
 	}
 	if err := json.Unmarshal(params, &a); err != nil {
 		return nil, fmt.Errorf("%w: invalid merge_entity params: %s", mcp.ErrUserFacing, err)
@@ -656,7 +675,7 @@ func (t *MergeEntityTool) Call(ctx context.Context, params json.RawMessage) (any
 	if a.Author == "" {
 		a.Author = "claude"
 	}
-	res, err := t.store.MergeEntity(ctx, a.Source, a.Target, memory.EntityType(a.Type), a.Author, a.AllowCrossType)
+	res, err := t.store.MergeEntity(ctx, a.Source, a.Target, memory.EntityType(a.Type), a.Author, bool(a.AllowCrossType))
 	return res, asUserFacing(err)
 }
 
