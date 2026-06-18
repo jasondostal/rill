@@ -4,7 +4,7 @@ All notable changes to Rill are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
-## [1.0.0] — Initial public release
+## [0.1.0] — Initial public release
 
 The first public release of Rill: a fast, MCP-native memory server backed by a
 single Go binary and one SurrealDB instance.
