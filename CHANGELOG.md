@@ -21,8 +21,9 @@ single Go binary and one SurrealDB instance.
 - **Web UI** (SvelteKit) — memory browser with search, filters, and card/dense
   views; inline edit and delete; an Explore graph view; a dashboard with stats
   and growth charts; a Cmd-K command palette; full keyboard navigation
-- **CLI** — single authenticated binary (`boot`, `search`, `store`, `token`),
-  cross-compiled for macOS arm64 and Linux amd64
+- **CLI** — single authenticated binary at full parity with MCP/REST
+  (`orient`, `recall`, `remember`, `entities`, `merge-entity`, `set-version`,
+  `doc-put`, `doc-delete`, …), cross-compiled for macOS arm64 and Linux amd64
 - **MCP server** — meta-MCP `discover`/`load` pattern; works with Claude
   Desktop, LM Studio, and other MCP clients
 
@@ -31,7 +32,7 @@ single Go binary and one SurrealDB instance.
   live tuning sliders, applied site-wide
 
 ### Auth & deployment
-- Bearer-token (PAT) auth for agents and the CLI; create/list/revoke via UI/CLI
+- Bearer-token (PAT) auth for agents and the CLI; create/list/revoke in the web UI
 - Human auth via built-in local login or a trusted reverse proxy (SSO)
 - Docker Compose deployment; reverse-proxy + TLS supported
 - CI: lint, test, SAST, dependency and image vulnerability scanning

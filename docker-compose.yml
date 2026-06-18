@@ -67,9 +67,17 @@ services:
       - RILL_PORT=8080
       - RILL_AUTH_MODE=${RILL_AUTH_MODE:-local}
       - RILL_DATA_DIR=/var/lib/rill
+      # rill keeps two SurrealDB connections at the same server: a WebSocket one
+      # (SURREAL_URL) for schema/auth, and the HTTP /sql endpoint (RILL_SURREAL_*)
+      # for the memory store. SurrealDB serves both protocols on the same port,
+      # so both point at the "surrealdb" service. Omitting RILL_SURREAL_URL makes
+      # the store fall back to 127.0.0.1:8001 and crash-loop inside the container.
       - SURREAL_URL=ws://surrealdb:8000
       - SURREAL_USER=${SURREAL_USER:?SURREAL_USER must be set}
       - SURREAL_PASS=${SURREAL_PASS:?SURREAL_PASS must be set}
+      - RILL_SURREAL_URL=http://surrealdb:8000
+      - RILL_SURREAL_USER=${SURREAL_USER:?SURREAL_USER must be set}
+      - RILL_SURREAL_PASS=${SURREAL_PASS:?SURREAL_PASS must be set}
     volumes:
       - rill_data:/var/lib/rill
     depends_on:
