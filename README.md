@@ -10,6 +10,8 @@
 
 Rill gives your agents a memory that survives between sessions — one place for the things worth remembering, the entities they're about, and how everything connects. Stand it up with a single Go binary and one database, point any MCP client at it, and browse it all in a fast dark-first web UI.
 
+![Rill dashboard — memory growth over time, totals for memories, entities, documents and relations, and a breakdown by memory kind](docs/images/dashboard.png)
+
 ## Quick Start
 
 ```bash
@@ -87,6 +89,10 @@ Memory tooling reaches full parity across the CLI, MCP, and REST surfaces —
 anything an agent can do over MCP (`remember`, `recall`, `merge-entity`,
 `set-version`, `doc-put`, …) has a `rill` subcommand and a REST route. Run
 `rill --help` for the full list; tokens are managed in the web UI at `/settings`.
+
+**macOS sidecar** — a native menu-bar companion (SwiftUI) for fast capture. Jot a memory, pick a kind, and save with ⌘↵ without leaving what you're doing; recent memories stay a glance away. It talks to the same REST API as the CLI.
+
+<img src="docs/images/sidecar.png" alt="Rill macOS menu-bar sidecar — a capture box with memory-kind chips and a list of recent memories" width="360">
 
 **MCP server** — drop Rill into any MCP client (Claude Desktop, LM Studio, etc.) and your agents read and write the same memory:
 
