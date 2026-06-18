@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# pre-commit: block commits that contain denylisted personal/internal refs.
+# Scans the STAGED snapshot (the index) — what you're actually about to commit.
+#
+# Install (tracked hooks dir): git config core.hooksPath .githooks
+set -euo pipefail
+exec "$(git rev-parse --show-toplevel)/scripts/pii-guard.sh" --staged

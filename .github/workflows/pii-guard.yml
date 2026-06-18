@@ -1,0 +1,34 @@
+name: pii-guard
+
+# Backstop for the pre-commit hook: if a personal/internal reference slips past
+# local hooks, fail the build before it can be merged to a public branch.
+#
+# The denylist is a PII index, so it can't live in the repo. Store it as a repo
+# secret named PII_DENYLIST (Settings → Secrets → Actions). This job writes it
+# to a temp file at runtime and points pii-guard at it. --require-list makes the
+# job FAIL CLOSED if the secret is missing, so the guard can't silently no-op.
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  pii-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Materialize denylist from secret
+        env:
+          PII_DENYLIST: ${{ secrets.PII_DENYLIST }}
+        run: |
+          printf '%s\n' "$PII_DENYLIST" > "$RUNNER_TEMP/pii-denylist"
+      - name: Run pii-guard
+        env:
+          PII_GUARD_DENYLIST: ${{ runner.temp }}/pii-denylist
+        run: |
+          chmod +x scripts/pii-guard.sh
+          # --quiet: withhold denylist patterns + matched content from the log,
+          # since Actions logs are world-readable once the repo is public.
+          scripts/pii-guard.sh --require-list --quiet

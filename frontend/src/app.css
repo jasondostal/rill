@@ -1,0 +1,58 @@
+@import "tailwindcss";
+
+/* Rill — OKLCH color system (perceptually uniform, dark-first, mapped to shadcn-svelte) */
+
+@theme inline {
+  --color-background: oklch(0.15 0.02 260);
+  --color-foreground: oklch(0.9 0.02 260);
+  --color-card: oklch(0.18 0.03 260);
+  --color-card-foreground: oklch(0.9 0.02 260);
+  --color-popover: oklch(0.18 0.03 260);
+  --color-popover-foreground: oklch(0.9 0.02 260);
+  --color-primary: oklch(0.65 0.18 260);
+  --color-primary-foreground: oklch(1 0 0);
+  --color-secondary: oklch(0.22 0.06 260);
+  --color-secondary-foreground: oklch(0.9 0.02 260);
+  --color-muted: oklch(0.2 0.02 260);
+  --color-muted-foreground: oklch(0.55 0.05 260);
+  --color-accent: oklch(0.65 0.18 260);
+  --color-accent-foreground: oklch(1 0 0);
+  --color-destructive: oklch(0.55 0.2 20);
+  --color-destructive-foreground: oklch(1 0 0);
+  --color-border: oklch(0.25 0.04 260);
+  --color-input: oklch(0.25 0.04 260);
+  --color-ring: oklch(0.65 0.18 260);
+
+  --radius-sm: 0.25rem;
+  --radius-md: 0.5rem;
+  --radius-lg: 0.75rem;
+  --radius-xl: 1rem;
+}
+
+/* Global dark theme (only theme) */
+body {
+  background-color: var(--color-background);
+  color: var(--color-foreground);
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+}
+
+/* Print / Save-as-PDF: strip the app chrome and print only the document.
+   The document reader marks its body with .doc-print-area; everything tagged
+   .no-print (sidebar, nav, action bars, breadcrumbs) is hidden. Used by the
+   "Download PDF" button (window.print()) on the document reader. */
+@media print {
+  .sidebar,
+  .nav-toggle,
+  .nav-backdrop,
+  .no-print {
+    display: none !important;
+  }
+  main {
+    padding: 0 !important;
+  }
+  .doc-print-area {
+    max-width: none !important;
+    color: #000 !important;
+    background: #fff !important;
+  }
+}

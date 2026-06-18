@@ -1,0 +1,29 @@
+# pii-guard denylist — SAMPLE / FORMAT REFERENCE ONLY.
+#
+# ⚠ DO NOT put real names here and DO NOT commit a real denylist. The real list
+# is a PII index — it belongs OUTSIDE the repo. Copy this format to:
+#     ${XDG_CONFIG_HOME:-~/.config}/pii-guard/denylist      (shared, all repos)
+#   or  ./.pii-denylist                                      (gitignored, this repo)
+#   or point $PII_GUARD_DENYLIST at a file.
+#
+# One extended-regex (ERE) pattern per line, matched case-insensitively.
+# '#' comments and blank lines are ignored. Patterns can be literal names or
+# regexes. Anchor with \b to avoid substring noise (UTIL → "utility").
+#
+# --- People (you, family, coworkers, your boss) ---
+# Firstname
+# Lastname
+# \bNickname\b
+#
+# --- Employer / orgs ---
+# Some Company Inc
+# \bACME\b
+#
+# --- Internal hostnames / domains / IPs ---
+# yourdomain\.example
+# \b(HOSTA|HOSTB)\b
+# 10\.0\.0\.
+# 192\.168\.
+#
+# --- Predecessor / sibling project codenames an outsider shouldn't see ---
+# OldProjectName

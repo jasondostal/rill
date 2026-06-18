@@ -1,0 +1,168 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 6 * * 1" # Weekly vulnerability scan
+
+jobs:
+  # ── Lint ──────────────────────────────────────────────────────
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - run: go vet ./...
+
+  # ── Test (with SurrealDB) ────────────────────────────────────
+  # SurrealDB runs as a workflow step rather than a service container so we
+  # can pass `start --user root ...` as a command — GitHub's services.options
+  # field does not support CMD args.
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - name: Start SurrealDB
+        run: |
+          # In-memory storage: tests don't need persistence and we avoid the
+          # writable-volume requirement of surrealkv/rocksdb.
+          docker run -d --name surreal -p 8000:8000 \
+            surrealdb/surrealdb:v3.0.5 \
+            start --bind 0.0.0.0:8000 --user root --pass root --log info memory
+          # Give SurrealDB a moment to start, then poll /health.
+          for i in $(seq 1 30); do
+            if curl -sf http://localhost:8000/health >/dev/null 2>&1; then
+              echo "SurrealDB ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "SurrealDB failed to start within 30s. Container logs:"
+          docker logs surreal
+          docker ps -a --filter name=surreal
+          exit 1
+      - run: go vet ./...
+      - name: Run tests
+        env:
+          # The two live-DB tests in internal/db skip cleanly when this is
+          # unset; setting it here so they actually run against the SurrealDB
+          # this job started above.
+          RILL_TEST_SURREAL_URL: ws://localhost:8000
+        run: go test -race -coverprofile=coverage.out ./...
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+      - name: Stop SurrealDB
+        if: always()
+        run: docker rm -f surreal || true
+
+  # ── SAST — Go security analyzer ───────────────────────────────
+  # gosec runs but doesn't block CI: it surfaces real findings and false
+  # positives both, and triaging is a separate workflow. Findings are
+  # visible in the job log; real ones get fixed and #nosec-annotated.
+  sast:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    # gosec ships its own bundled Go and runs with GOTOOLCHAIN=local; override
+    # to auto so it fetches the toolchain version go.mod requires.
+    env:
+      GOTOOLCHAIN: auto
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - uses: securego/gosec@master
+        with:
+          args: ./...
+
+  # ── Go vulnerability scan ────────────────────────────────────
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26.x"
+      - run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - run: govulncheck ./...
+
+  # ── Trivy filesystem scan (dependencies) ─────────────────────
+  trivy-fs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy-fs.sarif
+          severity: HIGH,CRITICAL
+      - uses: github/codeql-action/upload-sarif@v3
+        # SARIF upload requires GitHub Advanced Security on private repos.
+        # Without GHAS the upload returns "Resource not accessible" and
+        # fails the job. Make it non-blocking — the Trivy scan still runs
+        # and findings are visible in the job log.
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: trivy-fs.sarif
+
+  # ── Docker build + push to GHCR ────────────────────────────
+  docker:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository }}:main
+            ghcr.io/${{ github.repository }}:${{ github.sha }}
+            ghcr.io/${{ github.repository }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ghcr.io/${{ github.repository }}:${{ github.sha }}
+          format: sarif
+          output: trivy-image.sarif
+          severity: HIGH,CRITICAL
+      - uses: github/codeql-action/upload-sarif@v3
+        # Non-blocking — see note on the trivy-fs job above.
+        if: always()
+        continue-on-error: true
+        with:
+          sarif_file: trivy-image.sarif
+
+  # ── Dependency review ────────────────────────────────────────
+  dependency-review:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/dependency-review-action@v4
