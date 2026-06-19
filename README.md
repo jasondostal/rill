@@ -1,7 +1,9 @@
-# Rill
+<div align="center">
 
-> **A tiny stream, flowing memory.**
->
+<img src="docs/brand/banner.png" alt="rill — a tiny stream, flowing memory" width="640">
+
+</div>
+
 > Fast, MCP-native memory server. One database for documents, graph relationships, and vector search. Built for multi-agent teams tired of context waste.
 
 [![CI](https://github.com/jasondostal/rill/actions/workflows/ci.yml/badge.svg)](https://github.com/jasondostal/rill/actions/workflows/ci.yml)
