@@ -35,6 +35,14 @@ func orientMemChars() int {
 	return settings.Get().OrientMemChars()
 }
 
+// orientCardChars caps the prose-bearing card lines (Identity/Facts/Decisions)
+// when an entity card renders into orient. The full card is always one
+// get_entity away, so orient shows headlines to stay lean for small-context
+// models. Configurable via RILL_ORIENT_CARD_CHARS; <= 0 disables truncation.
+func orientCardChars() int {
+	return settings.Get().OrientCardChars()
+}
+
 // isRecencyGatedPredicate reports whether an edge predicate represents
 // "something worked on / operated" — these are recency-filtered in orient so
 // dormant projects don't flood the view. Other predicates (works_at, uses,
@@ -237,8 +245,15 @@ func (s *Store) renderOrient(ctx context.Context, project string) (string, error
 		b.WriteString("\n")
 	}
 
+	// The owner's own prefers/relationship edges already render inside their
+	// Identity card (Preferences + Active edges sections), so the global
+	// preference/relationship rollups below exclude owner-subject edges to avoid
+	// restating them. Non-owner edges (e.g. a spouse's job, a project's deps)
+	// still surface — those are additive, not duplicates.
+	owner := settings.Get().OwnerEntity()
+
 	// Active preferences (active prefers edges)
-	prefs, _ := s.fetchActivePreferences(ctx)
+	prefs, _ := s.fetchActivePreferences(ctx, owner)
 	if len(prefs) > 0 {
 		b.WriteString("## Active preferences\n")
 		for _, p := range prefs {
@@ -248,7 +263,7 @@ func (s *Store) renderOrient(ctx context.Context, project string) (string, error
 	}
 
 	// Active relationships (works_at, works_on, uses, depends_on — active edges)
-	rels, _ := s.fetchActiveRelationships(ctx)
+	rels, _ := s.fetchActiveRelationships(ctx, owner)
 	if len(rels) > 0 {
 		b.WriteString("## Active relationships\n")
 		for _, r := range rels {
@@ -306,8 +321,9 @@ func renderEntitySection(b *strings.Builder, e promotedEntity) {
 		if wroteAny {
 			b.WriteString("\n")
 		}
-		b.WriteString(e.DerivedCard)
-		if !strings.HasSuffix(e.DerivedCard, "\n") {
+		card := compactCardForOrient(e.DerivedCard, orientCardChars())
+		b.WriteString(card)
+		if !strings.HasSuffix(card, "\n") {
 			b.WriteString("\n")
 		}
 		wroteAny = true
@@ -404,8 +420,12 @@ type prefRow struct {
 	Valence string `json:"valence"`
 }
 
-func (s *Store) fetchActivePreferences(ctx context.Context) ([]prefRow, error) {
-	stmt := `SELECT in.name AS subject, out.name AS object, valence, valid_from FROM prefers WHERE valid_until IS NONE ORDER BY valid_from DESC LIMIT 30;`
+func (s *Store) fetchActivePreferences(ctx context.Context, owner string) ([]prefRow, error) {
+	where := "valid_until IS NONE"
+	if owner != "" {
+		where += " AND in != " + owner
+	}
+	stmt := fmt.Sprintf(`SELECT in.name AS subject, out.name AS object, valence, valid_from FROM prefers WHERE %s ORDER BY valid_from DESC LIMIT 30;`, where)
 	res, err := s.db.SQL(ctx, stmt, true)
 	if err != nil {
 		return nil, err
@@ -427,10 +447,16 @@ type relRow struct {
 	Role      string `json:"role"`
 }
 
-func (s *Store) fetchActiveRelationships(ctx context.Context) ([]relRow, error) {
+func (s *Store) fetchActiveRelationships(ctx context.Context, owner string) ([]relRow, error) {
+	// Exclude the owner as subject — their edges already render in the Identity
+	// card's Active edges section. Non-owner subjects still surface (additive).
+	ownerClause := ""
+	if owner != "" {
+		ownerClause = " AND in != " + owner
+	}
 	var out []relRow
 	// works_at
-	r, _ := s.db.SQL(ctx, `SELECT in.name AS subject, out.name AS object, role_title AS role, valid_from FROM works_at WHERE valid_until IS NONE ORDER BY valid_from DESC LIMIT 10;`, true)
+	r, _ := s.db.SQL(ctx, fmt.Sprintf(`SELECT in.name AS subject, out.name AS object, role_title AS role, valid_from FROM works_at WHERE valid_until IS NONE%s ORDER BY valid_from DESC LIMIT 10;`, ownerClause), true)
 	if len(r) > 0 && len(r[0].Result) > 0 {
 		var rows []relRow
 		_ = json.Unmarshal(r[0].Result, &rows)
@@ -441,7 +467,7 @@ func (s *Store) fetchActiveRelationships(ctx context.Context) ([]relRow, error) 
 	}
 	// works_on — recency-gated: only projects touched within the orient window.
 	// Edges stay valid in the graph; this filters visibility only.
-	r, _ = s.db.SQL(ctx, fmt.Sprintf(`SELECT in.name AS subject, out.name AS object, valid_from FROM works_on WHERE valid_until IS NONE AND out.last_edited_at > %s ORDER BY valid_from DESC LIMIT 10;`, EscapeDatetime(orientRecencyCutoff())), true)
+	r, _ = s.db.SQL(ctx, fmt.Sprintf(`SELECT in.name AS subject, out.name AS object, valid_from FROM works_on WHERE valid_until IS NONE AND out.last_edited_at > %s%s ORDER BY valid_from DESC LIMIT 10;`, EscapeDatetime(orientRecencyCutoff()), ownerClause), true)
 	if len(r) > 0 && len(r[0].Result) > 0 {
 		var rows []relRow
 		_ = json.Unmarshal(r[0].Result, &rows)
@@ -451,7 +477,7 @@ func (s *Store) fetchActiveRelationships(ctx context.Context) ([]relRow, error) 
 		out = append(out, rows...)
 	}
 	// uses
-	r, _ = s.db.SQL(ctx, `SELECT in.name AS subject, out.name AS object, valid_from FROM uses WHERE valid_until IS NONE ORDER BY valid_from DESC LIMIT 10;`, true)
+	r, _ = s.db.SQL(ctx, fmt.Sprintf(`SELECT in.name AS subject, out.name AS object, valid_from FROM uses WHERE valid_until IS NONE%s ORDER BY valid_from DESC LIMIT 10;`, ownerClause), true)
 	if len(r) > 0 && len(r[0].Result) > 0 {
 		var rows []relRow
 		_ = json.Unmarshal(r[0].Result, &rows)
@@ -461,7 +487,7 @@ func (s *Store) fetchActiveRelationships(ctx context.Context) ([]relRow, error) 
 		out = append(out, rows...)
 	}
 	// depends_on
-	r, _ = s.db.SQL(ctx, `SELECT in.name AS subject, out.name AS object, valid_from FROM depends_on WHERE valid_until IS NONE ORDER BY valid_from DESC LIMIT 10;`, true)
+	r, _ = s.db.SQL(ctx, fmt.Sprintf(`SELECT in.name AS subject, out.name AS object, valid_from FROM depends_on WHERE valid_until IS NONE%s ORDER BY valid_from DESC LIMIT 10;`, ownerClause), true)
 	if len(r) > 0 && len(r[0].Result) > 0 {
 		var rows []relRow
 		_ = json.Unmarshal(r[0].Result, &rows)
@@ -506,6 +532,42 @@ func (s *Store) fetchRecentMemories(ctx context.Context, days int, project strin
 		return nil, err
 	}
 	return rows, nil
+}
+
+// compactCardForOrient truncates the prose-bearing lines of a pre-rendered
+// derived_card to at most max characters each, so a heavy owner/project card
+// doesn't dominate orient. Only the Identity, Facts, and Decisions sections are
+// trimmed — Active edges and Preferences lines are already terse and pass
+// through untouched. The trailing " _(author, day)_" attribution is preserved.
+// The stored card is unchanged (get_entity still returns full text); this only
+// affects the orient blob. max <= 0 returns the card verbatim.
+func compactCardForOrient(card string, max int) string {
+	if max <= 0 || card == "" {
+		return card
+	}
+	trunc := map[string]bool{"Identity": true, "Facts": true, "Decisions": true}
+	lines := strings.Split(card, "\n")
+	section := ""
+	for i, ln := range lines {
+		if h, ok := strings.CutPrefix(ln, "## "); ok {
+			section = strings.TrimSpace(h)
+			continue
+		}
+		if !trunc[section] || !strings.HasPrefix(ln, "- ") {
+			continue
+		}
+		body := strings.TrimPrefix(ln, "- ")
+		// Peel off the trailing " _(author, day)_" so it survives truncation.
+		summary, suffix := body, ""
+		if j := strings.LastIndex(body, " _("); j >= 0 && strings.HasSuffix(body, ")_") {
+			summary, suffix = body[:j], body[j:]
+		}
+		if len([]rune(summary)) <= max {
+			continue
+		}
+		lines[i] = "- " + truncateForOrient(summary, max) + suffix
+	}
+	return strings.Join(lines, "\n")
 }
 
 func oneLiner(s string) string {

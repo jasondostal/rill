@@ -36,24 +36,24 @@ const (
 
 // Setting is the static metadata for one config knob.
 type Setting struct {
-	Key      string   `json:"key"`               // canonical key, e.g. "orient.recency_days"
-	Env      string   `json:"env"`               // backing env var name
-	Group    string   `json:"group"`             // UI grouping
-	Label    string   `json:"label"`             // human label
-	Desc     string   `json:"desc"`              // one-line explanation
-	Kind     Kind     `json:"kind"`              // int|bool|string|enum
-	Default  string   `json:"default"`           // default in string form
-	Options  []string `json:"options,omitempty"` // static enum choices
+	Key     string   `json:"key"`               // canonical key, e.g. "orient.recency_days"
+	Env     string   `json:"env"`               // backing env var name
+	Group   string   `json:"group"`             // UI grouping
+	Label   string   `json:"label"`             // human label
+	Desc    string   `json:"desc"`              // one-line explanation
+	Kind    Kind     `json:"kind"`              // int|bool|string|enum
+	Default string   `json:"default"`           // default in string form
+	Options []string `json:"options,omitempty"` // static enum choices
 	// OptionsSource tells the UI to populate a dropdown dynamically rather than
 	// from Options — e.g. "entity:person" → fetch person entities (value = record
 	// id, label = name). Value is still validated as a plain string server-side.
 	OptionsSource string `json:"options_source,omitempty"`
-	Min      *int     `json:"min,omitempty"`     // int lower bound (inclusive)
-	Max      *int     `json:"max,omitempty"`     // int upper bound (inclusive)
-	Unit     string   `json:"unit,omitempty"`    // e.g. "days", "chars", "bytes"
-	Editable bool     `json:"editable"`          // user-settable (when not env-pinned)
-	Hot      bool     `json:"hot"`               // applies live (no restart)
-	Secret   bool     `json:"secret"`            // value never leaves the server
+	Min           *int   `json:"min,omitempty"`  // int lower bound (inclusive)
+	Max           *int   `json:"max,omitempty"`  // int upper bound (inclusive)
+	Unit          string `json:"unit,omitempty"` // e.g. "days", "chars", "bytes"
+	Editable      bool   `json:"editable"`       // user-settable (when not env-pinned)
+	Hot           bool   `json:"hot"`            // applies live (no restart)
+	Secret        bool   `json:"secret"`         // value never leaves the server
 }
 
 func intp(n int) *int { return &n }
@@ -69,6 +69,10 @@ var Registry = []Setting{
 		Label: "Recent-memory headline length", Kind: KindInt, Default: "200", Min: intp(0), Max: intp(2000), Unit: "chars",
 		Editable: true, Hot: true,
 		Desc: "Caps each recent-memory line in orient to keep it lean for small-context models. 0 = no truncation (full summaries)."},
+	{Key: "orient.card_chars", Env: "RILL_ORIENT_CARD_CHARS", Group: "Orient & Memory",
+		Label: "Entity-card line length", Kind: KindInt, Default: "280", Min: intp(0), Max: intp(2000), Unit: "chars",
+		Editable: true, Hot: true,
+		Desc: "Caps each Identity/Facts/Decisions line when an entity card renders into orient. 0 = no truncation. get_entity always shows full text."},
 	{Key: "orient.owner_entity", Env: "RILL_OWNER_ENTITY", Group: "Orient & Memory",
 		Label: "Owner entity", Kind: KindString, Default: "", OptionsSource: "entity:person",
 		Editable: true, Hot: true,
@@ -159,7 +163,7 @@ var Registry = []Setting{
 	// ---- Capture defaults (editable, hot; no env backing) ----
 	{Key: "capture.default_kind", Group: "Capture",
 		Label: "Default capture kind", Kind: KindEnum, Default: "fact",
-		Options: []string{"decision", "preference", "insight", "procedure", "fact", "identity", "rule", "idea"},
+		Options:  []string{"decision", "preference", "insight", "procedure", "fact", "identity", "rule", "idea"},
 		Editable: true, Hot: true,
 		Desc: "Kind pre-selected in the sidecar's capture card."},
 	{Key: "capture.default_project", Group: "Capture",
@@ -298,6 +302,10 @@ func (s *Service) OrientRecencyDays() int {
 
 // OrientMemChars caps recent-memory headline length in orient (<=0 disables).
 func (s *Service) OrientMemChars() int { return s.intVal("orient.mem_chars") }
+
+// OrientCardChars caps Identity/Facts/Decisions line length when an entity card
+// renders into orient (<=0 disables). get_entity always returns the full card.
+func (s *Service) OrientCardChars() int { return s.intVal("orient.card_chars") }
 
 // OwnerEntity is the record id pinned first in orient's Identity section ("").
 func (s *Service) OwnerEntity() string { return strings.TrimSpace(s.str("orient.owner_entity")) }
