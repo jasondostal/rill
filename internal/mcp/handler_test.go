@@ -30,6 +30,29 @@ func TestInitialize(t *testing.T) {
 	}
 }
 
+// TestPing guards the MCP keepalive reply. The response must carry a present,
+// empty result object — a bare {"jsonrpc":"2.0","id":N} (result dropped by
+// omitempty) is an invalid JSON-RPC response that strict clients reject, which
+// showed up as Hermes "gateway heartbeat failed" reconnect loops.
+func TestPing(t *testing.T) {
+	h := setupHandler()
+	rec := call(t, h, `{"jsonrpc":"2.0","id":2,"method":"ping"}`)
+
+	if body := rec.Body.String(); !strings.Contains(body, `"result"`) {
+		t.Fatalf("ping response missing result field: %s", body)
+	}
+
+	var resp mcp.Response
+	mustDecode(t, rec, &resp)
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatalf("expected empty result object, got %T", resp.Result)
+	}
+	if len(result) != 0 {
+		t.Errorf("expected empty result, got %v", result)
+	}
+}
+
 func TestToolsList(t *testing.T) {
 	h := setupHandler()
 	rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)

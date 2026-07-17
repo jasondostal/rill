@@ -75,6 +75,12 @@ func (h *Handler) dispatch(ctx context.Context, method string, params json.RawMe
 	switch method {
 	case "initialize":
 		return h.handleInitialize(params)
+	case "ping":
+		// MCP keepalive. The reply must carry an empty result object; a
+		// non-nil map serializes as {} (nil would be dropped by the Result
+		// field's omitempty, yielding a bare {"jsonrpc":...,"id":N} that
+		// strict clients reject and loop reconnecting on).
+		return map[string]any{}, nil
 	case "tools/list":
 		return h.handleToolsList()
 	case "tools/call":
