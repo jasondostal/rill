@@ -7,13 +7,13 @@ import (
 	"github.com/jasondostal/rill/internal/memory"
 )
 
-func TestParseRememberParams(t *testing.T) {
+func TestDecodeToolArgs_Remember(t *testing.T) {
 	t.Run("structured path decodes normally", func(t *testing.T) {
 		in := json.RawMessage(`{
 			"summary": "s", "kind": "fact", "author": "claude",
 			"entities": [{"name":"Jason Dostal","type":"person"}]
 		}`)
-		p, err := parseRememberParams(in)
+		p, err := decodeToolArgs[memory.RememberPayload](in)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -28,7 +28,7 @@ func TestParseRememberParams(t *testing.T) {
 	t.Run("payload escape hatch is parsed", func(t *testing.T) {
 		inner := `{"summary":"s2","kind":"decision","author":"claude","entities":[{"name":"rill","type":"project"}]}`
 		b, _ := json.Marshal(map[string]string{"payload": inner})
-		p, err := parseRememberParams(b)
+		p, err := decodeToolArgs[memory.RememberPayload](b)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -50,21 +50,18 @@ func TestParseRememberParams(t *testing.T) {
 			"summary": "",
 			"payload": inner,
 		})
-		p, err := parseRememberParams(b)
+		p, err := decodeToolArgs[memory.RememberPayload](b)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if p.Kind != memory.KindInsight {
-			t.Fatalf("expected payload kind to win, got %q", p.Kind)
-		}
-		if p.Summary != "real" {
-			t.Fatalf("expected payload summary to win, got %q", p.Summary)
+		if p.Kind != memory.KindInsight || p.Summary != "real" {
+			t.Fatalf("expected payload to win, got %+v", p)
 		}
 	})
 
 	t.Run("blank payload falls back to structured fields", func(t *testing.T) {
 		in := json.RawMessage(`{"summary":"s","kind":"fact","author":"claude","payload":"   "}`)
-		p, err := parseRememberParams(in)
+		p, err := decodeToolArgs[memory.RememberPayload](in)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -72,4 +69,28 @@ func TestParseRememberParams(t *testing.T) {
 			t.Fatalf("blank payload should not override: %+v", p)
 		}
 	})
+}
+
+// flexBool must accept the string forms MCP clients send when their cached tool
+// schema is stale and serializes an unknown boolean param as a string.
+func TestFlexBool(t *testing.T) {
+	cases := map[string]bool{
+		`true`: true, `"true"`: true, `"1"`: true, `1`: true,
+		`false`: false, `"false"`: false, `"0"`: false, `0`: false,
+		`""`: false, `null`: false,
+	}
+	for in, want := range cases {
+		var b flexBool
+		if err := json.Unmarshal([]byte(in), &b); err != nil {
+			t.Fatalf("flexBool(%s) errored: %v", in, err)
+		}
+		if bool(b) != want {
+			t.Fatalf("flexBool(%s) = %v, want %v", in, bool(b), want)
+		}
+	}
+	// Genuinely invalid forms should still error.
+	var b flexBool
+	if err := json.Unmarshal([]byte(`"maybe"`), &b); err == nil {
+		t.Fatalf(`flexBool("maybe") should error`)
+	}
 }

@@ -44,6 +44,7 @@ func (t *DocPutTool) Definition() mcp.ToolDefinition {
 				"author":     map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
 				"created_at": map[string]any{"type": "string", "description": "RFC3339; CREATE only — preserves original authoring date on import/backfill. Omit for now()."},
 				"updated_at": map[string]any{"type": "string", "description": "RFC3339; CREATE only. Defaults to created_at when omitted."},
+				"payload":    map[string]any{"type": "string", "description": "ROBUSTNESS ESCAPE HATCH: the ENTIRE doc_put input as one JSON string. If set, parsed server-side and WINS over the individual fields above. Use when your MCP client mangles the nested `entities` array (dropping sibling fields); a single string transits reliably."},
 			},
 			"required": []string{"title"},
 		},
@@ -51,8 +52,8 @@ func (t *DocPutTool) Definition() mcp.ToolDefinition {
 }
 
 func (t *DocPutTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
-	var in document.PutInput
-	if err := json.Unmarshal(params, &in); err != nil {
+	in, err := decodeToolArgs[document.PutInput](params)
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid doc_put params: %s", mcp.ErrUserFacing, err)
 	}
 	if in.Author == "" {

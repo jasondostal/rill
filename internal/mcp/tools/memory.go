@@ -50,8 +50,7 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 					"description": "The relationships this claim asserts or updates — prefer declaring at least one when the claim is relational (X uses Y, X depends_on Y, X part_of Y, person works_at org). Each: {subject, subject_type, predicate, object, object_type, valence?, role_title?, weight?}. Both endpoints must also appear in entities[].",
 					"items":       map[string]any{"type": "object"},
 				},
-				"payload": map[string]any{"type": "string", "description": "ROBUSTNESS ESCAPE HATCH for MCP clients that mangle nested array params: the ENTIRE remember payload as one JSON string ({\"summary\":..,\"kind\":..,\"author\":..,\"entities\":[..],\"edges\":[..]}). If set, it is parsed server-side and WINS over the individual fields above. Some clients drop sibling scalar fields (notably `kind`) while serializing the entities/edges arrays, producing a spurious 'kind is empty' rejection; sending everything as a single string sidesteps that. Prefer the structured fields normally — reach for this only when a structured call fails.",
-				},
+				"payload": map[string]any{"type": "string", "description": "ROBUSTNESS ESCAPE HATCH for MCP clients that mangle nested array params: the ENTIRE remember payload as one JSON string ({\"summary\":..,\"kind\":..,\"author\":..,\"entities\":[..],\"edges\":[..]}). If set, it is parsed server-side and WINS over the individual fields above. Some clients drop sibling scalar fields (notably `kind`) while serializing the entities/edges arrays, producing a spurious 'kind is empty' rejection; sending everything as a single string sidesteps that. Prefer the structured fields normally — reach for this only when a structured call fails."},
 			},
 			"required": []string{"summary", "kind", "author"},
 		},
@@ -59,7 +58,7 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 }
 
 func (t *RememberTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
-	p, err := parseRememberParams(params)
+	p, err := decodeToolArgs[memory.RememberPayload](params)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid remember params: %s", mcp.ErrUserFacing, err)
 	}
@@ -67,15 +66,17 @@ func (t *RememberTool) Call(ctx context.Context, params json.RawMessage) (any, e
 	return res, asUserFacing(err)
 }
 
-// parseRememberParams decodes remember tool arguments, honoring the `payload`
-// escape hatch. Some MCP clients corrupt tool calls that carry nested array
-// params (entities/edges): they drop sibling scalar fields like `kind` while
-// serializing the arrays, so a well-formed remember arrives with kind="" and is
-// wrongly rejected by validation. When `payload` (the whole RememberPayload as a
-// single JSON string) is present, it is parsed on its own and WINS over the
-// top-level fields — the client only has to transmit one scalar string, which it
-// does reliably. Absent `payload`, behavior is unchanged: decode params directly.
-func parseRememberParams(params json.RawMessage) (memory.RememberPayload, error) {
+// decodeToolArgs decodes MCP tool arguments into T, honoring the `payload`
+// escape hatch: the whole args object may be passed as a single JSON string in a
+// `payload` field, which is parsed here and WINS over the top-level fields.
+// Rationale: some MCP clients corrupt tool calls that carry nested array params
+// (entities/edges) — they drop sibling scalar fields like `kind` while
+// serializing the arrays, so a well-formed call arrives with those fields empty
+// and is wrongly rejected. Transmitting everything as one scalar string, which
+// clients handle reliably, sidesteps the corruption. Absent `payload`, behavior
+// is unchanged. Tools with nested array/object params (remember, doc_put) expose
+// a `payload` string in their schema and decode via this helper.
+func decodeToolArgs[T any](params json.RawMessage) (T, error) {
 	var wrapper struct {
 		Payload string `json:"payload"`
 	}
@@ -86,11 +87,12 @@ func parseRememberParams(params json.RawMessage) (memory.RememberPayload, error)
 		raw = json.RawMessage(wrapper.Payload)
 	}
 
-	var p memory.RememberPayload
-	if err := json.Unmarshal(raw, &p); err != nil {
-		return memory.RememberPayload{}, err
+	var v T
+	if err := json.Unmarshal(raw, &v); err != nil {
+		var zero T
+		return zero, err
 	}
-	return p, nil
+	return v, nil
 }
 
 // flexBool is a bool that also accepts the string forms MCP clients commonly
@@ -187,9 +189,14 @@ func (t *OrientTool) Definition() mcp.ToolDefinition {
 func (t *OrientTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
 	var q memory.OrientQuery
 	if len(params) > 0 {
-		if err := json.Unmarshal(params, &q); err != nil {
+		var args struct {
+			Project    string   `json:"project"`
+			ForceRegen flexBool `json:"force_regen"`
+		}
+		if err := json.Unmarshal(params, &args); err != nil {
 			return nil, err
 		}
+		q = memory.OrientQuery{Project: args.Project, ForceRegen: bool(args.ForceRegen)}
 	}
 	return t.store.Orient(ctx, q)
 }
@@ -427,7 +434,7 @@ func (t *ListEntitiesTool) Definition() mcp.ToolDefinition {
 func (t *ListEntitiesTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
 	var args struct {
 		Type     memory.EntityType `json:"type"`
-		Promoted *bool             `json:"promoted"`
+		Promoted *flexBool         `json:"promoted"`
 		Sort     string            `json:"sort"`
 		Limit    int               `json:"limit"`
 	}
@@ -438,7 +445,7 @@ func (t *ListEntitiesTool) Call(ctx context.Context, params json.RawMessage) (an
 	}
 	rows, err := t.store.ListEntities(ctx, memory.ListEntitiesQuery{
 		Type:     args.Type,
-		Promoted: args.Promoted,
+		Promoted: (*bool)(args.Promoted),
 		Sort:     args.Sort,
 		Limit:    args.Limit,
 	})
@@ -597,14 +604,14 @@ func (t *EditMemoryTool) Definition() mcp.ToolDefinition {
 
 func (t *EditMemoryTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
 	var args struct {
-		MemoryID string   `json:"memory_id"`
-		Summary  *string  `json:"summary,omitempty"`
-		Details  *string  `json:"details,omitempty"`
-		Tags     []string `json:"tags,omitempty"`
-		Valence  *string  `json:"valence,omitempty"`
-		Project  *string  `json:"project,omitempty"`
-		Pinned   *bool    `json:"pinned,omitempty"`
-		Author   string   `json:"author"`
+		MemoryID string    `json:"memory_id"`
+		Summary  *string   `json:"summary,omitempty"`
+		Details  *string   `json:"details,omitempty"`
+		Tags     []string  `json:"tags,omitempty"`
+		Valence  *string   `json:"valence,omitempty"`
+		Project  *string   `json:"project,omitempty"`
+		Pinned   *flexBool `json:"pinned,omitempty"`
+		Author   string    `json:"author"`
 	}
 	if err := json.Unmarshal(params, &args); err != nil {
 		return nil, err
@@ -615,7 +622,7 @@ func (t *EditMemoryTool) Call(ctx context.Context, params json.RawMessage) (any,
 		Tags:    args.Tags,
 		Valence: args.Valence,
 		Project: args.Project,
-		Pinned:  args.Pinned,
+		Pinned:  (*bool)(args.Pinned),
 		Author:  args.Author,
 	})
 }
@@ -678,10 +685,10 @@ func (t *MergeEntityTool) Definition() mcp.ToolDefinition {
 		InputSchema: map[string]any{
 			"type": "object",
 			"properties": map[string]any{
-				"source": map[string]any{"type": "string", "description": "Entity to retire — full record id (e.g. 'tool:kimi_k2_6') or bare name (then set `type`)."},
-				"target": map[string]any{"type": "string", "description": "Surviving entity — full record id (e.g. 'tool:kimi') or bare name."},
-				"type":   map[string]any{"type": "string", "description": "Entity type (person|project|tool|organization|place|preference|concept), required when source/target are bare names."},
-				"author": map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
+				"source":           map[string]any{"type": "string", "description": "Entity to retire — full record id (e.g. 'tool:kimi_k2_6') or bare name (then set `type`)."},
+				"target":           map[string]any{"type": "string", "description": "Surviving entity — full record id (e.g. 'tool:kimi') or bare name."},
+				"type":             map[string]any{"type": "string", "description": "Entity type (person|project|tool|organization|place|preference|concept), required when source/target are bare names."},
+				"author":           map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
 				"allow_cross_type": map[string]any{"type": "boolean", "description": "Permit merging across entity types — only when source and target are genuinely the SAME thing recorded under two types. Both refs must be full record ids. Default false."},
 			},
 			"required": []string{"source", "target", "author"},
@@ -691,10 +698,10 @@ func (t *MergeEntityTool) Definition() mcp.ToolDefinition {
 
 func (t *MergeEntityTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
 	var a struct {
-		Source         string `json:"source"`
-		Target         string `json:"target"`
-		Type           string `json:"type"`
-		Author         string `json:"author"`
+		Source         string   `json:"source"`
+		Target         string   `json:"target"`
+		Type           string   `json:"type"`
+		Author         string   `json:"author"`
 		AllowCrossType flexBool `json:"allow_cross_type"`
 	}
 	if err := json.Unmarshal(params, &a); err != nil {
