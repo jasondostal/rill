@@ -50,6 +50,8 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 					"description": "The relationships this claim asserts or updates — prefer declaring at least one when the claim is relational (X uses Y, X depends_on Y, X part_of Y, person works_at org). Each: {subject, subject_type, predicate, object, object_type, valence?, role_title?, weight?}. Both endpoints must also appear in entities[].",
 					"items":       map[string]any{"type": "object"},
 				},
+				"payload": map[string]any{"type": "string", "description": "ROBUSTNESS ESCAPE HATCH for MCP clients that mangle nested array params: the ENTIRE remember payload as one JSON string ({\"summary\":..,\"kind\":..,\"author\":..,\"entities\":[..],\"edges\":[..]}). If set, it is parsed server-side and WINS over the individual fields above. Some clients drop sibling scalar fields (notably `kind`) while serializing the entities/edges arrays, producing a spurious 'kind is empty' rejection; sending everything as a single string sidesteps that. Prefer the structured fields normally — reach for this only when a structured call fails.",
+				},
 			},
 			"required": []string{"summary", "kind", "author"},
 		},
@@ -57,12 +59,38 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 }
 
 func (t *RememberTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
-	var p memory.RememberPayload
-	if err := json.Unmarshal(params, &p); err != nil {
+	p, err := parseRememberParams(params)
+	if err != nil {
 		return nil, fmt.Errorf("%w: invalid remember params: %s", mcp.ErrUserFacing, err)
 	}
 	res, err := t.store.Remember(ctx, p)
 	return res, asUserFacing(err)
+}
+
+// parseRememberParams decodes remember tool arguments, honoring the `payload`
+// escape hatch. Some MCP clients corrupt tool calls that carry nested array
+// params (entities/edges): they drop sibling scalar fields like `kind` while
+// serializing the arrays, so a well-formed remember arrives with kind="" and is
+// wrongly rejected by validation. When `payload` (the whole RememberPayload as a
+// single JSON string) is present, it is parsed on its own and WINS over the
+// top-level fields — the client only has to transmit one scalar string, which it
+// does reliably. Absent `payload`, behavior is unchanged: decode params directly.
+func parseRememberParams(params json.RawMessage) (memory.RememberPayload, error) {
+	var wrapper struct {
+		Payload string `json:"payload"`
+	}
+	_ = json.Unmarshal(params, &wrapper)
+
+	raw := params
+	if strings.TrimSpace(wrapper.Payload) != "" {
+		raw = json.RawMessage(wrapper.Payload)
+	}
+
+	var p memory.RememberPayload
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return memory.RememberPayload{}, err
+	}
+	return p, nil
 }
 
 // flexBool is a bool that also accepts the string forms MCP clients commonly
