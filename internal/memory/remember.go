@@ -254,6 +254,10 @@ func buildMemoryInsert(id string, p RememberPayload, txTime, eventTime time.Time
 	if p.ValidUntil != nil {
 		validUntilExpr = EscapeDatetime(*p.ValidUntil)
 	}
+	openedAtExpr := "NONE"
+	if p.Open {
+		openedAtExpr = EscapeDatetime(txTime) // opened_at = created_at (transaction time)
+	}
 
 	return fmt.Sprintf(`CREATE %s SET
 		summary    = %s,
@@ -266,6 +270,8 @@ func buildMemoryInsert(id string, p RememberPayload, txTime, eventTime time.Time
 		valid_from = %s,
 		valid_until = %s,
 		is_active  = true,
+		open       = %t,
+		opened_at  = %s,
 		embedding  = %s,
 		created_at = %s,
 		updated_at = %s;`,
@@ -279,6 +285,8 @@ func buildMemoryInsert(id string, p RememberPayload, txTime, eventTime time.Time
 		valenceExpr,
 		EscapeDatetime(eventTime), // valid_from = event time
 		validUntilExpr,
+		p.Open,
+		openedAtExpr,
 		embJSON,
 		EscapeDatetime(txTime), // created_at = transaction time
 		EscapeDatetime(txTime), // updated_at = transaction time

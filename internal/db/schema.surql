@@ -38,6 +38,8 @@ DEFINE FIELD IF NOT EXISTS superseded_by ON memory TYPE option<record<memory>>;
 -- Lifecycle
 DEFINE FIELD IF NOT EXISTS is_active     ON memory TYPE bool DEFAULT true;
 DEFINE FIELD IF NOT EXISTS pinned        ON memory TYPE bool DEFAULT false;  -- ★ user-pinned (sidecar / web row action)
+DEFINE FIELD IF NOT EXISTS open          ON memory TYPE bool DEFAULT false; -- open loop; existing rows read as NONE == closed
+DEFINE FIELD IF NOT EXISTS opened_at     ON memory TYPE option<datetime>;   -- set when open flips true; retained on close
 DEFINE FIELD IF NOT EXISTS created_at    ON memory TYPE datetime DEFAULT time::now();
 DEFINE FIELD IF NOT EXISTS updated_at    ON memory TYPE datetime DEFAULT time::now();
 
@@ -55,6 +57,7 @@ DEFINE INDEX IF NOT EXISTS idx_memory_project ON memory FIELDS project;
 DEFINE INDEX IF NOT EXISTS idx_memory_author ON memory FIELDS author;
 DEFINE INDEX IF NOT EXISTS idx_memory_active_valid ON memory FIELDS is_active, valid_until;
 DEFINE INDEX IF NOT EXISTS idx_memory_created ON memory FIELDS created_at;
+DEFINE INDEX IF NOT EXISTS idx_memory_open ON memory FIELDS is_active, open;
 
 -- ------------------------------------------------------------
 -- Entity tables — typed, with hand-curated card and promotion flag
@@ -80,6 +83,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON person TYPE option<record>;       -- 
 DEFINE INDEX IF NOT EXISTS idx_person_name ON person FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_person_promoted ON person FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_person_emb ON person FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_person_last_edited ON person FIELDS last_edited_at;
 
 DEFINE TABLE IF NOT EXISTS project SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name           ON project TYPE string;
@@ -98,6 +102,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON project TYPE option<record>;       --
 DEFINE INDEX IF NOT EXISTS idx_project_name ON project FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_project_promoted ON project FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_project_emb ON project FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_project_last_edited ON project FIELDS last_edited_at;
 
 DEFINE TABLE IF NOT EXISTS tool SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name           ON tool TYPE string;
@@ -116,6 +121,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON tool TYPE option<record>;       -- se
 DEFINE INDEX IF NOT EXISTS idx_tool_name ON tool FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_tool_promoted ON tool FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_tool_emb ON tool FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_tool_last_edited ON tool FIELDS last_edited_at;
 
 DEFINE TABLE IF NOT EXISTS organization SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name           ON organization TYPE string;
@@ -134,6 +140,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON organization TYPE option<record>;    
 DEFINE INDEX IF NOT EXISTS idx_org_name ON organization FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_org_promoted ON organization FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_org_emb ON organization FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_org_last_edited ON organization FIELDS last_edited_at;
 
 DEFINE TABLE IF NOT EXISTS place SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name           ON place TYPE string;
@@ -152,6 +159,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON place TYPE option<record>;       -- s
 DEFINE INDEX IF NOT EXISTS idx_place_name ON place FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_place_promoted ON place FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_place_emb ON place FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_place_last_edited ON place FIELDS last_edited_at;
 
 DEFINE TABLE IF NOT EXISTS preference SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name           ON preference TYPE string;
@@ -170,6 +178,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON preference TYPE option<record>;      
 DEFINE INDEX IF NOT EXISTS idx_pref_name ON preference FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_pref_promoted ON preference FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_pref_emb ON preference FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_pref_last_edited ON preference FIELDS last_edited_at;
 
 DEFINE TABLE IF NOT EXISTS concept SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS name           ON concept TYPE string;
@@ -188,6 +197,7 @@ DEFINE FIELD IF NOT EXISTS merged_into  ON concept TYPE option<record>;       --
 DEFINE INDEX IF NOT EXISTS idx_concept_name ON concept FIELDS name UNIQUE;
 DEFINE INDEX IF NOT EXISTS idx_concept_promoted ON concept FIELDS promoted;
 DEFINE INDEX IF NOT EXISTS idx_concept_emb ON concept FIELDS embedding HNSW DIMENSION 1536 DIST COSINE;
+DEFINE INDEX IF NOT EXISTS idx_concept_last_edited ON concept FIELDS last_edited_at;
 
 -- ------------------------------------------------------------
 -- mentions — memory -> entity (provenance, no temporal bounds)
@@ -223,6 +233,8 @@ DEFINE FIELD IF NOT EXISTS valid_until   ON works_on TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS superseded_by ON works_on TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON works_on TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON works_on TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_works_on_valid_from ON works_on FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_works_on_valid_until ON works_on FIELDS valid_until;
 
 -- uses: any → any. "X uses Y" is not person-exclusive — a tool/project can use
 -- another tool/project (an app uses rill, rill uses SurrealDB). Broadened to match
@@ -238,6 +250,8 @@ DEFINE FIELD IF NOT EXISTS valid_until   ON uses TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS superseded_by ON uses TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON uses TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON uses TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_uses_valid_from ON uses FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_uses_valid_until ON uses FIELDS valid_until;
 
 DEFINE TABLE IF NOT EXISTS prefers TYPE RELATION FROM person TO preference SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS weight        ON prefers TYPE float DEFAULT 1.0;
@@ -248,6 +262,8 @@ DEFINE FIELD IF NOT EXISTS valid_until   ON prefers TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS superseded_by ON prefers TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON prefers TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON prefers TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_prefers_valid_from ON prefers FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_prefers_valid_until ON prefers FIELDS valid_until;
 
 DEFINE TABLE IF NOT EXISTS works_at TYPE RELATION FROM person TO organization SCHEMAFULL;
 DEFINE FIELD IF NOT EXISTS weight        ON works_at TYPE float DEFAULT 1.0;
@@ -257,6 +273,8 @@ DEFINE FIELD IF NOT EXISTS valid_until   ON works_at TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS superseded_by ON works_at TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON works_at TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON works_at TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_works_at_valid_from ON works_at FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_works_at_valid_until ON works_at FIELDS valid_until;
 
 -- depends_on: any entity → any entity. Captures runtime/architectural dependencies
 -- regardless of type (e.g. app depends_on database, service depends_on host).
@@ -270,6 +288,8 @@ DEFINE FIELD IF NOT EXISTS valid_until   ON depends_on TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS superseded_by ON depends_on TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON depends_on TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON depends_on TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_depends_on_valid_from ON depends_on FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_depends_on_valid_until ON depends_on FIELDS valid_until;
 
 -- part_of: any → any. Captures containment regardless of type (e.g. tool part_of
 -- project, person part_of organization). Use this for "X belongs to Y" semantics.
@@ -283,6 +303,8 @@ DEFINE FIELD IF NOT EXISTS valid_until   ON part_of TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS superseded_by ON part_of TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON part_of TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON part_of TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_part_of_valid_from ON part_of FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_part_of_valid_until ON part_of FIELDS valid_until;
 
 -- Generic edge for predicates not covered above; subject/object may be any entity.
 -- Useful for caller-declared edges like "version_is", "discussed_with", etc.
@@ -298,6 +320,8 @@ DEFINE FIELD IF NOT EXISTS superseded_by ON assertion TYPE option<record>;
 DEFINE FIELD IF NOT EXISTS source        ON assertion TYPE option<record<memory>>;
 DEFINE FIELD IF NOT EXISTS created_at    ON assertion TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS idx_assertion_predicate ON assertion FIELDS predicate;
+DEFINE INDEX IF NOT EXISTS idx_assertion_valid_from ON assertion FIELDS valid_from;
+DEFINE INDEX IF NOT EXISTS idx_assertion_valid_until ON assertion FIELDS valid_until;
 
 -- ------------------------------------------------------------
 -- orient_cache — rendered text blob, invalidated by writes
@@ -311,6 +335,18 @@ DEFINE FIELD IF NOT EXISTS stale             ON orient_cache TYPE bool DEFAULT t
 DEFINE FIELD IF NOT EXISTS rendered_at       ON orient_cache TYPE option<datetime>;
 DEFINE FIELD IF NOT EXISTS created_at        ON orient_cache TYPE datetime DEFAULT time::now();
 DEFINE INDEX IF NOT EXISTS idx_orient_scope ON orient_cache FIELDS scope UNIQUE;
+
+-- ------------------------------------------------------------
+-- orient_caller — per-caller "last time you oriented" watermark, drives the
+-- "## Since last orient" delta section. Record id mirrors orient_cache's
+-- pattern (safeID(caller) as the key); `caller` is duplicated as a field so
+-- it projects cleanly out of SELECT.
+-- ------------------------------------------------------------
+
+DEFINE TABLE IF NOT EXISTS orient_caller SCHEMAFULL;
+DEFINE FIELD IF NOT EXISTS caller           ON orient_caller TYPE string;          -- '<identity.Type>/<identity.Name>' or 'anonymous'
+DEFINE FIELD IF NOT EXISTS last_oriented_at ON orient_caller TYPE datetime DEFAULT time::now();
+DEFINE INDEX IF NOT EXISTS idx_orient_caller ON orient_caller FIELDS caller UNIQUE;
 
 -- app_setting — runtime config overrides set via the settings UI. Record id is
 -- the canonical setting key (e.g. app_setting:`orient.recency_days`); `k`

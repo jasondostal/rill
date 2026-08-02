@@ -4,6 +4,38 @@ All notable changes to Rill are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.3.0] — Orient v2
+
+Four additions to `orient`, rill's boot-context render, aimed at making it a
+sharper "what's going on" briefing instead of a static dump.
+
+### Added
+- **Open loops** — memories can be flagged `open` (via `remember(open:true)`
+  or `edit_memory(open:...)`), and orient now renders a "## Open loops"
+  section listing every active open memory, oldest concern first, with an
+  `(opened YYYY-MM-DD)` marker. Closing a loop (`open:false`) retains its
+  `opened_at` for the record.
+- **Per-caller delta** — orient now resolves the calling identity and renders
+  a "## Since last orient (Nd ago)" section right after the header: new
+  memories, entities touched, edges opened/closed, and new rules since that
+  caller's last orient. First-time callers get `_first orient for this
+  caller_` instead. The delta is computed fresh on every call and spliced
+  into the cached render — it never lives in the orient cache blob itself.
+- **Map** — global orient gains a final "## Map" section: dormant/unsurfaced
+  projects, every document title (with type), entity counts by type plus the
+  top 10 by mention count, and a closing pointer to `get_entity` / `doc_get`
+  / `recall` / `orient(project=...)`. Deliberately generous — it's the index
+  of everything reachable but not rendered above the fold.
+- **Focus** — `orient(project=X)` now assembles a focused subgraph instead of
+  just filtering the global render: rules, the owner's identity card, the
+  scoped delta, the project entity's full (untruncated) card, all of its
+  1-hop edges with neighbor summaries, project-scoped document titles, open
+  loops, and recent memories — plus a pointer back to the global map.
+
+### Changed
+- Schema: `memory.open` (bool) and `memory.opened_at` (option\<datetime\>)
+  fields, applied idempotently; existing rows read as closed (`NONE` == false).
+
 ## [0.1.0] — Initial public release
 
 The first public release of Rill: a fast, MCP-native memory server backed by a

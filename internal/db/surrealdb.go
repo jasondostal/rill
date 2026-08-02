@@ -349,7 +349,7 @@ func (d *DB) Ping(ctx context.Context) error {
 
 // SchemaVersion tracks the current DDL version. Bump this when non-idempotent
 // changes are added. Idempotent IF NOT EXISTS changes don't need a bump.
-const SchemaVersion = "2026-05-26-v9" // v9: document table + doc_about relation (standalone markdown docs, outside the memory pipeline)
+const SchemaVersion = "2026-08-02-v11" // v11: orient_caller table + entity/edge indexes (per-caller orient delta)
 
 // SetupSchema creates the initial tables and indexes.
 // After applying DDL, records the schema version so future non-idempotent

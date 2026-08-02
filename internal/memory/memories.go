@@ -22,17 +22,19 @@ type ListMemoriesQuery struct {
 
 // MemoryRow is the projection used in the time-ordered browse list.
 type MemoryRow struct {
-	ID        string    `json:"id"`
-	Summary   string    `json:"summary"`
-	Details   string    `json:"details,omitempty"`
-	Kind      string    `json:"kind"`
-	Tags      []string  `json:"tags,omitempty"`
-	Author    string    `json:"author"`
-	Project   string    `json:"project,omitempty"`
-	Valence   string    `json:"valence,omitempty"`
-	Pinned    bool      `json:"pinned"`
-	IsActive  bool      `json:"is_active"`
-	CreatedAt time.Time `json:"created_at"`
+	ID        string     `json:"id"`
+	Summary   string     `json:"summary"`
+	Details   string     `json:"details,omitempty"`
+	Kind      string     `json:"kind"`
+	Tags      []string   `json:"tags,omitempty"`
+	Author    string     `json:"author"`
+	Project   string     `json:"project,omitempty"`
+	Valence   string     `json:"valence,omitempty"`
+	Pinned    bool       `json:"pinned"`
+	Open      bool       `json:"open"` // ★ open loop; NONE on unmigrated rows unmarshals to false
+	OpenedAt  *time.Time `json:"opened_at,omitempty"`
+	IsActive  bool       `json:"is_active"`
+	CreatedAt time.Time  `json:"created_at"`
 }
 
 // MemoryDetail is the full payload for the memory detail page.
@@ -65,7 +67,7 @@ func (s *Store) ListMemories(ctx context.Context, q ListMemoriesQuery) ([]Memory
 
 	stmt := fmt.Sprintf(`SELECT
 		id, summary, details, kind, tags, author, project, valence,
-		pinned, is_active, created_at
+		pinned, open, opened_at, is_active, created_at
 		FROM memory
 		WHERE %s
 		ORDER BY created_at DESC
@@ -94,6 +96,7 @@ type EditMemoryPatch struct {
 	Valence *string  `json:"valence,omitempty"` // optional; "" clears
 	Project *string  `json:"project,omitempty"` // optional; "" clears
 	Pinned  *bool    `json:"pinned,omitempty"`  // ★ toggle; nil = leave
+	Open    *bool    `json:"open,omitempty"`    // ★ toggle; nil = leave. false closes the loop (opened_at retained)
 	Author  string   `json:"author"`
 }
 
@@ -172,11 +175,23 @@ func (s *Store) EditMemory(ctx context.Context, memID string, patch EditMemoryPa
 	if patch.Pinned != nil {
 		sets = append(sets, fmt.Sprintf("pinned = %t", *patch.Pinned))
 	}
+	if patch.Open != nil {
+		sets = append(sets, fmt.Sprintf("open = %t", *patch.Open))
+		// Stamp opened_at the first time a loop opens; a close (open:false) or a
+		// re-affirmed open on an already-open loop leaves the original date alone.
+		if *patch.Open && before.OpenedAt == nil {
+			sets = append(sets, fmt.Sprintf("opened_at = %s", EscapeDatetime(now())))
+		}
+	}
 
 	// A pin toggle touches neither the projected content nor orient, so a
 	// pinned-only edit can skip the derived-card recompute + orient invalidation.
+	// An open-loop toggle DOES need orient invalidated (it renders in the "Open
+	// loops" section) even though it doesn't touch entity cards, so it's tracked
+	// separately from contentChanged rather than folded in.
 	contentChanged := summaryPatch != nil || detailsPatch != nil ||
 		patch.Tags != nil || patch.Valence != nil || patch.Project != nil
+	orientAffecting := contentChanged || patch.Open != nil
 
 	if summaryPatch != nil {
 		if emb := s.embedForWrite(ctx, *summaryPatch); emb != nil {
@@ -199,7 +214,9 @@ func (s *Store) EditMemory(ctx context.Context, memID string, patch EditMemoryPa
 		for _, e := range before.MentionedEntities {
 			_ = s.recomputeDerivedCard(ctx, e.ID)
 		}
+	}
 
+	if orientAffecting {
 		_ = s.markOrientStale(ctx, "global")
 		if before.Project != "" {
 			_ = s.markOrientStale(ctx, "project:"+before.Project)
@@ -270,7 +287,7 @@ func (s *Store) GetMemory(ctx context.Context, memID string) (*MemoryDetail, err
 	// Memory row.
 	stmt := fmt.Sprintf(`SELECT
 		id, summary, details, kind, tags, author, project, valence,
-		pinned, is_active, created_at
+		pinned, open, opened_at, is_active, created_at
 		FROM %s;`, memID)
 	res, err := s.db.SQL(ctx, stmt, true)
 	if err != nil {

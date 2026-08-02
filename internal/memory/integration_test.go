@@ -18,6 +18,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jasondostal/rill/internal/auth"
 )
 
 func wipeV3(t *testing.T, c *Client) {
@@ -27,7 +29,7 @@ func wipeV3(t *testing.T, c *Client) {
 		"memory", "mentions", "assertion", "version_is",
 		"works_on", "uses", "prefers", "works_at", "depends_on", "part_of",
 		"person", "project", "tool", "organization", "place", "preference", "concept",
-		"orient_cache", "app_setting",
+		"orient_cache", "orient_caller", "app_setting",
 	}
 	for _, tab := range tables {
 		_, _ = c.SQL(ctx, "DELETE "+tab+";", false)
@@ -856,5 +858,244 @@ func TestRemember_CrossTypeExactNameBlock(t *testing.T) {
 		Entities: []EntityDecl{{Name: "Mercury", Type: EntityPerson, ForceNew: true}},
 	}); err != nil {
 		t.Fatalf("force_new homonym should be allowed: %v", err)
+	}
+}
+
+// TestRemember_OpenLoop verifies remember(open:true) sets both open and
+// opened_at (= created_at), and that a plain remember() (open omitted)
+// defaults to closed with no opened_at.
+func TestRemember_OpenLoop(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	r, err := s.Remember(ctx, RememberPayload{
+		Summary: "Follow up on the migration once staging soaks for a week.",
+		Kind:    KindIdea, Author: "claude", Open: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.GetMemory(ctx, r.MemoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.Open {
+		t.Fatalf("expected open=true, got %+v", got.MemoryRow)
+	}
+	if got.OpenedAt == nil {
+		t.Fatalf("expected opened_at to be set, got nil")
+	}
+	if !got.OpenedAt.Equal(got.CreatedAt) {
+		t.Errorf("expected opened_at == created_at on creation, got opened_at=%v created_at=%v", got.OpenedAt, got.CreatedAt)
+	}
+
+	r2, err := s.Remember(ctx, RememberPayload{
+		Summary: "Ordinary memory, not an open loop.",
+		Kind:    KindFact, Author: "claude",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got2, err := s.GetMemory(ctx, r2.MemoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got2.Open {
+		t.Errorf("expected open=false by default, got true")
+	}
+	if got2.OpenedAt != nil {
+		t.Errorf("expected opened_at to be unset by default, got %v", got2.OpenedAt)
+	}
+}
+
+// TestEditMemory_OpenLoop verifies edit_memory's open toggle: opening a
+// memory that was never open stamps opened_at; closing it flips open=false
+// but retains the original opened_at; and any open change busts orient cache
+// even though it doesn't touch entity cards (unlike a pinned-only edit).
+func TestEditMemory_OpenLoop(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	r, err := s.Remember(ctx, RememberPayload{
+		Summary: "TODO: confirm the DR runbook works.", Kind: KindIdea, Author: "claude",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Warm the global orient cache.
+	if _, err := s.Orient(ctx, OrientQuery{}); err != nil {
+		t.Fatal(err)
+	}
+
+	openTrue := true
+	if _, err := s.EditMemory(ctx, r.MemoryID, EditMemoryPatch{Open: &openTrue, Author: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	after, err := s.GetMemory(ctx, r.MemoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Open {
+		t.Fatalf("expected open=true after edit, got %+v", after.MemoryRow)
+	}
+	if after.OpenedAt == nil {
+		t.Fatalf("expected opened_at to be stamped on open, got nil")
+	}
+	firstOpenedAt := *after.OpenedAt
+
+	// Orient cache should now be stale (open changes render into "Open loops").
+	cached, err := s.fetchOrientCache(ctx, "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached == nil || !cached.Stale {
+		t.Errorf("expected global orient cache to be marked stale after an open-flag edit")
+	}
+
+	// Close it — open flips false, opened_at is retained.
+	openFalse := false
+	if _, err := s.EditMemory(ctx, r.MemoryID, EditMemoryPatch{Open: &openFalse, Author: "claude"}); err != nil {
+		t.Fatal(err)
+	}
+	closed, err := s.GetMemory(ctx, r.MemoryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if closed.Open {
+		t.Errorf("expected open=false after close")
+	}
+	if closed.OpenedAt == nil || !closed.OpenedAt.Equal(firstOpenedAt) {
+		t.Errorf("expected opened_at to be retained across close, got %v want %v", closed.OpenedAt, firstOpenedAt)
+	}
+}
+
+// TestOrient_RendersOpenLoops verifies the "## Open loops" section renders
+// is_active open memories (with project prefix when set) and omits closed
+// ones.
+func TestOrient_RendersOpenLoops(t *testing.T) {
+	s := newTestStore(t)
+	ctx := context.Background()
+
+	if _, err := s.Remember(ctx, RememberPayload{
+		Summary: "Loop: rotate the staging credentials before the audit.",
+		Kind:    KindIdea, Author: "claude", Project: "rill", Open: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	closedRes, err := s.Remember(ctx, RememberPayload{
+		Summary: "Not a loop, just a fact.", Kind: KindFact, Author: "claude",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Orient(ctx, OrientQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Rendered, "## Open loops") {
+		t.Fatalf("expected an Open loops section, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "[rill] Loop: rotate the staging credentials") {
+		t.Errorf("expected the open loop line with project prefix, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "(opened ") {
+		t.Errorf("expected an (opened YYYY-MM-DD) marker, got:\n%s", got.Rendered)
+	}
+	if strings.Contains(got.Rendered, "Not a loop, just a fact") {
+		t.Errorf("closed memory should not appear in Open loops, got:\n%s", got.Rendered)
+	}
+	_ = closedRes
+}
+
+// TestOrientDelta_FirstTimeCaller verifies a caller with no orient_caller row
+// yet gets the "_first orient for this caller_" placeholder instead of a
+// dated delta.
+func TestOrientDelta_FirstTimeCaller(t *testing.T) {
+	s := newTestStore(t)
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Type: "bearer", Name: "delta-first-caller"})
+
+	got, err := s.Orient(ctx, OrientQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(got.Rendered, "## Since last orient") {
+		t.Fatalf("expected a Since last orient section, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "_first orient for this caller_") {
+		t.Errorf("expected the first-time-caller placeholder, got:\n%s", got.Rendered)
+	}
+}
+
+// TestOrientDelta_RendersChangesSincePriorOrient verifies the delta surfaces
+// a new memory, a touched entity, and a newly-opened edge that all happened
+// strictly after this caller's previous orient() call — and that the same
+// caller's second call no longer reads as first-time.
+func TestOrientDelta_RendersChangesSincePriorOrient(t *testing.T) {
+	s := newTestStore(t)
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Type: "bearer", Name: "delta-repeat-caller"})
+
+	// Establish the caller's baseline watermark.
+	if _, err := s.Orient(ctx, OrientQuery{}); err != nil {
+		t.Fatal(err)
+	}
+
+	// Changes since the baseline: a new memory (with a project), two touched
+	// entities, and a new works_on edge between them.
+	if _, err := s.Remember(ctx, RememberPayload{
+		Summary: "Delta test: shipped the new widget.", Kind: KindFact, Author: "claude",
+		Project: "deltaproj",
+		Entities: []EntityDecl{
+			{Name: "Delta Person", Type: EntityPerson},
+			{Name: "Delta Project", Type: EntityProject},
+		},
+		Edges: []EdgeDecl{{Subject: "Delta Person", SubjectType: EntityPerson,
+			Predicate: "works_on", Object: "Delta Project", ObjectType: EntityProject}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := s.Orient(ctx, OrientQuery{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(got.Rendered, "_first orient for this caller_") {
+		t.Errorf("second orient() for the same caller must not read as first-time, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "## Since last orient (") {
+		t.Fatalf("expected a dated Since last orient header, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "Delta test: shipped the new widget") {
+		t.Errorf("expected the new memory summary in the delta, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "Delta Person (person)") && !strings.Contains(got.Rendered, "Delta Project (project)") {
+		t.Errorf("expected at least one touched entity in the delta, got:\n%s", got.Rendered)
+	}
+	if !strings.Contains(got.Rendered, "works_on: **Delta Person** → **Delta Project**") {
+		t.Errorf("expected the new works_on edge under Edges opened, got:\n%s", got.Rendered)
+	}
+}
+
+// TestOrientDelta_CacheBodyExcludesDelta is the critical cache-interaction
+// guarantee: the delta is per-caller and time-dependent, so it must never be
+// part of the orient_cache blob itself — only spliced into the response.
+func TestOrientDelta_CacheBodyExcludesDelta(t *testing.T) {
+	s := newTestStore(t)
+	ctx := auth.WithIdentity(context.Background(), auth.Identity{Type: "bearer", Name: "delta-cache-caller"})
+
+	if _, err := s.Orient(ctx, OrientQuery{}); err != nil {
+		t.Fatal(err)
+	}
+
+	cached, err := s.fetchOrientCache(ctx, "global")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cached == nil {
+		t.Fatal("expected a cached global orient row after Orient()")
+	}
+	if strings.Contains(cached.Rendered, "## Since last orient") {
+		t.Errorf("orient_cache.rendered must never contain the per-caller delta, got:\n%s", cached.Rendered)
 	}
 }

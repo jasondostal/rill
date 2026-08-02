@@ -40,6 +40,7 @@ func (t *RememberTool) Definition() mcp.ToolDefinition {
 				"author":  map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
 				"project": map[string]any{"type": "string", "description": "Optional scope (e.g. 'rill', 'homelab')."},
 				"valence": map[string]any{"type": "string", "description": "positive | negative | neutral (only for kind=preference)"},
+				"open":    map[string]any{"type": "boolean", "description": "Mark this memory an open loop (todo/pending); it surfaces in orient's 'Open loops' section until closed via edit_memory."},
 				"entities": map[string]any{
 					"type":        "array",
 					"description": "The entities this claim is about — declare ALL of them; this is how the memory enriches the graph. Each: {name, type, aliases?, summary?, force_new?}. Type ∈ person|project|tool|organization|place|preference|concept. Reuse existing entities, and CREATE new ones freely for genuinely new things. DEDUP: exact name AND known aliases fold into the existing node automatically (so check the graph and prefer an existing entity's canonical name). A name that looks like an alternate FORM of an existing same-type entity (e.g. 'Acme CU' when 'Acme Communities Credit Union' exists) is REJECTED with the candidate named — reuse that name, or merge_entity, or set force_new:true on this one entity if it's genuinely distinct. An exact name match under a DIFFERENT type is also rejected (the same thing recorded under two types is the most common real dupe) — reuse the existing node's type, or force_new:true for a genuine homonym. Specializations (e.g. 'Rill Sidecar' alongside 'rill') are allowed through.",
@@ -174,7 +175,7 @@ func NewOrientTool(s *memory.Store) *OrientTool { return &OrientTool{store: s} }
 func (t *OrientTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "orient",
-		Description:    "Return the cached orient markdown blob for a scope. The blob assembles rules + identity cards + active project cards + active topics + active tools + active preferences (with valence) + active relationships (bi-temporally filtered) + recent intentional memories. Set force_regen=true to rebuild even if cache is fresh.",
+		Description:    "Session-boot orientation blob, rendered per scope. Global (no project): rules + identity + promoted entity cards + preferences + relationships + a per-caller 'Since last orient' delta + recent memories + open loops + a Map of everything else reachable (dormant projects, doc titles, entity counts). With project=X: Focus mode — rules + identity + delta + X's full card with 1-hop edges + X-scoped docs, open loops, and recent memories (promoted-entity dumps are omitted; use global orient for those). Set force_regen=true to rebuild even if cache is fresh.",
 		RequiredScopes: []string{"read"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -583,7 +584,7 @@ func NewEditMemoryTool(s *memory.Store) *EditMemoryTool { return &EditMemoryTool
 func (t *EditMemoryTool) Definition() mcp.ToolDefinition {
 	return mcp.ToolDefinition{
 		Name:           "edit_memory",
-		Description:    "Patch mutable fields on an existing memory (summary, details, tags, valence, project, pinned). Re-embeds the summary if changed. Recomputes derived_card on every entity the memory mentions. IMMUTABLE: id, kind, author, created_at (use forget + remember to change those). Author required for audit. CURATION DUTY: when you READ a memory and can see a claim has gone stale (a 'NOT yet' that since happened, a TODO that's done, a plan that was executed), edit it closed right then — mark resolved items resolved, keep the durable lesson, and leave the memory better than you found it.",
+		Description:    "Patch mutable fields on an existing memory (summary, details, tags, valence, project, pinned, open). Re-embeds the summary if changed. Recomputes derived_card on every entity the memory mentions. IMMUTABLE: id, kind, author, created_at (use forget + remember to change those). Author required for audit. CURATION DUTY: when you READ a memory and can see a claim has gone stale (a 'NOT yet' that since happened, a TODO that's done, a plan that was executed), edit it closed right then — mark resolved items resolved, keep the durable lesson, and leave the memory better than you found it.",
 		RequiredScopes: []string{"write"},
 		InputSchema: map[string]any{
 			"type": "object",
@@ -595,6 +596,7 @@ func (t *EditMemoryTool) Definition() mcp.ToolDefinition {
 				"valence":   map[string]any{"type": "string", "description": "positive|negative|neutral; empty clears."},
 				"project":   map[string]any{"type": "string", "description": "New project scope; empty clears."},
 				"pinned":    map[string]any{"type": "boolean", "description": "★ pin/unpin this memory."},
+				"open":      map[string]any{"type": "boolean", "description": "Open/close this loop. false closes it (opened_at is retained)."},
 				"author":    map[string]any{"type": "string"},
 			},
 			"required": []string{"memory_id", "author"},
@@ -611,6 +613,7 @@ func (t *EditMemoryTool) Call(ctx context.Context, params json.RawMessage) (any,
 		Valence  *string   `json:"valence,omitempty"`
 		Project  *string   `json:"project,omitempty"`
 		Pinned   *flexBool `json:"pinned,omitempty"`
+		Open     *flexBool `json:"open,omitempty"`
 		Author   string    `json:"author"`
 	}
 	if err := json.Unmarshal(params, &args); err != nil {
@@ -623,6 +626,7 @@ func (t *EditMemoryTool) Call(ctx context.Context, params json.RawMessage) (any,
 		Valence: args.Valence,
 		Project: args.Project,
 		Pinned:  (*bool)(args.Pinned),
+		Open:    (*bool)(args.Open),
 		Author:  args.Author,
 	})
 }

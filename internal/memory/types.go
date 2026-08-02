@@ -115,6 +115,15 @@ func EdgeTableFor(predicate string) (table string, generic bool) {
 	return "assertion", true
 }
 
+// AllEdgeTables lists every relation table add_edge/remember can write an
+// edge to: the six dedicated tables (KnownPredicateTable's values) plus the
+// generic `assertion` fallback, which carries its predicate in a field
+// rather than in the table name. This is the vocabulary a caller must walk
+// to see every semantic edge regardless of predicate (merge, derived-card
+// rendering, entity listing, stats, and the orient per-caller delta each
+// iterate this same set).
+var AllEdgeTables = []string{"works_on", "uses", "prefers", "works_at", "depends_on", "part_of", "assertion"}
+
 // ============================================================
 // Input payloads (caller-facing)
 // ============================================================
@@ -160,6 +169,7 @@ type RememberPayload struct {
 	Author  string   `json:"author"` // <human-handle> | claude | <named-agent>
 	Project string   `json:"project,omitempty"`
 	Valence Valence  `json:"valence,omitempty"` // only for kind=preference
+	Open    bool     `json:"open,omitempty"`    // ★ mark this memory an open loop; opened_at = created_at
 
 	Entities []EntityDecl `json:"entities,omitempty"`
 	Edges    []EdgeDecl   `json:"edges,omitempty"`

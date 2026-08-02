@@ -11,7 +11,7 @@ func TestDecodeToolArgs_Remember(t *testing.T) {
 	t.Run("structured path decodes normally", func(t *testing.T) {
 		in := json.RawMessage(`{
 			"summary": "s", "kind": "fact", "author": "claude",
-			"entities": [{"name":"Jason Dostal","type":"person"}]
+			"entities": [{"name":"Alice Jones","type":"person"}]
 		}`)
 		p, err := decodeToolArgs[memory.RememberPayload](in)
 		if err != nil {
@@ -20,7 +20,7 @@ func TestDecodeToolArgs_Remember(t *testing.T) {
 		if p.Kind != memory.KindFact || p.Summary != "s" || p.Author != "claude" {
 			t.Fatalf("bad decode: %+v", p)
 		}
-		if len(p.Entities) != 1 || p.Entities[0].Name != "Jason Dostal" {
+		if len(p.Entities) != 1 || p.Entities[0].Name != "Alice Jones" {
 			t.Fatalf("entities not decoded: %+v", p.Entities)
 		}
 	})
