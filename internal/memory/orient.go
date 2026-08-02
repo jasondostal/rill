@@ -977,8 +977,11 @@ func renderOrientMapBody(d orientMapData) string {
 // projects" section (fetchPromoted selects promoted=true; this is its
 // complement). No recency gate — dormant is exactly "not promoted" here.
 func (s *Store) fetchDormantProjects(ctx context.Context) ([]mapProjectRow, error) {
-	stmt := fmt.Sprintf(`SELECT name, summary, derived_card FROM project
-		WHERE merged_into IS NONE AND promoted = false
+	// promoted != true (not = false): rows predating the promoted field carry
+	// NONE, and those are exactly the dormant ones. mention_count/last_seen
+	// must be projected — SurrealDB rejects ORDER BY on non-projected fields.
+	stmt := fmt.Sprintf(`SELECT name, summary, derived_card, mention_count, last_seen FROM project
+		WHERE merged_into IS NONE AND promoted != true
 		ORDER BY mention_count DESC, last_seen DESC LIMIT %d;`, mapDormantProjectLimit)
 	res, err := s.db.SQL(ctx, stmt, true)
 	if err != nil {
@@ -998,11 +1001,14 @@ func (s *Store) fetchDormantProjects(ctx context.Context) ([]mapProjectRow, erro
 // limit. project == "" fetches across every project (global map use); a
 // non-empty project scopes to it (Focus use).
 func (s *Store) fetchDocuments(ctx context.Context, project string, limit int) ([]docTitleRow, error) {
-	filters := []string{"is_active = true"}
+	// is_active != false (not = true): docs predating the is_active field
+	// carry NONE and are live. created_at must be projected — SurrealDB
+	// rejects ORDER BY on non-projected fields.
+	filters := []string{"is_active != false"}
 	if project != "" {
 		filters = append(filters, fmt.Sprintf("project = %s", EscapeStr(project)))
 	}
-	stmt := fmt.Sprintf(`SELECT title, doc_type FROM document WHERE %s ORDER BY created_at DESC LIMIT %d;`,
+	stmt := fmt.Sprintf(`SELECT title, doc_type, created_at FROM document WHERE %s ORDER BY created_at DESC LIMIT %d;`,
 		strings.Join(filters, " AND "), limit)
 	res, err := s.db.SQL(ctx, stmt, true)
 	if err != nil {
