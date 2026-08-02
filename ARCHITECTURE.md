@@ -24,7 +24,7 @@ Rill is an MCP-native memory server. A single Go binary serves MCP tools over HT
 cmd/rill/              Entry point. Config, server startup, tool registration.
 internal/
   server/              HTTP server, health check, MCP endpoint routing.
-  mcp/                 MCP protocol handler, tool registry, discover/load pattern.
+  mcp/                 MCP protocol handler, tool registry (full schemas on tools/list).
     tools/             Tool implementations: memory, documents, think, boot, entities, dream.
   db/                  SurrealDB client, connection, schema/migrations.
   memory/              Memory CRUD (store.go), search (keyword+vector+entity-anchored),

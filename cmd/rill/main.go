@@ -161,24 +161,14 @@ func main() {
 		}
 	}
 
-	// MCP tool registry — memory tools only (plus the discover meta-tool).
+	// MCP tool registry.
 	registry := mcp.NewRegistry()
-	registry.Register(mcptools.NewDiscoverTool(registry))
-	registry.Register(mcptools.NewLoadTool(registry))
 	mcptools.RegisterMemoryTools(registry, memStore)
-	rilllog.Logger().Info("mcp: memory tools registered (remember, recall, orient, edit_notes, add_edge, close_edge, list_entities, get_entity, list_memories, get_memory, promote, demote, forget, merge_entity, set_version)")
+	rilllog.Logger().Info("mcp: memory tools registered (remember, recall, orient, add_edge, close_edge, list_entities, get_entity, list_memories, get_memory, promote, demote, forget, merge_entity)")
 	mcptools.RegisterDocumentTools(registry, docStore)
 	rilllog.Logger().Info("mcp: document tools registered (doc_put, doc_get, doc_list, doc_delete)")
 
-	// MCP handler options.
-	mcpOpts := mcp.HandlerOpts{}
-	switch os.Getenv("RILL_COMPACT_TOOLS") {
-	case "1", "true":
-		mcpOpts.CompactTools = true
-	case "names":
-		mcpOpts.NamesOnly = true
-	}
-	mcpHandler := mcp.NewHandler(registry, mcpOpts)
+	mcpHandler := mcp.NewHandler(registry, mcp.HandlerOpts{})
 
 	// MCP OAuth manager (for `claude mcp add rill` flow).
 	var mcpOAuthMgr *auth.MCPOAuthManager

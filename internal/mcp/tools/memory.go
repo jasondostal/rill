@@ -203,55 +203,6 @@ func (t *OrientTool) Call(ctx context.Context, params json.RawMessage) (any, err
 }
 
 // ============================================================
-// edit_notes
-// ============================================================
-
-type EditNotesTool struct {
-	store *memory.Store
-}
-
-func NewEditNotesTool(s *memory.Store) *EditNotesTool { return &EditNotesTool{store: s} }
-
-func (t *EditNotesTool) Definition() mcp.ToolDefinition {
-	return mcp.ToolDefinition{
-		Name:           "edit_notes",
-		Description:    "Edit an entity's hand_notes — the free-form human-curated section that renders on the entity card alongside (not inside) the system-rendered derived_card. Use it for standing context about the entity that no single memory carries.",
-		RequiredScopes: []string{"write"},
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"entity": map[string]any{"type": "string", "description": "Full record id ('tool:pi') or just the name (then `type` is required)"},
-				"type":   map[string]any{"type": "string", "description": "Entity type when entity is bare name"},
-				"text":   map[string]any{"type": "string"},
-				"mode":   map[string]any{"type": "string", "description": "append (default) | replace"},
-				"author": map[string]any{"type": "string"},
-			},
-			"required": []string{"entity", "text", "author"},
-		},
-	}
-}
-
-func (t *EditNotesTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
-	var args struct {
-		Entity string            `json:"entity"`
-		Type   memory.EntityType `json:"type"`
-		Text   string            `json:"text"`
-		Mode   memory.NotesMode  `json:"mode"`
-		Author string            `json:"author"`
-	}
-	if err := json.Unmarshal(params, &args); err != nil {
-		return nil, err
-	}
-	if args.Mode == "" {
-		args.Mode = memory.NotesAppend
-	}
-	if err := t.store.EditHandNotes(ctx, args.Entity, args.Type, args.Text, args.Mode, args.Author); err != nil {
-		return nil, err
-	}
-	return map[string]any{"status": "ok"}, nil
-}
-
-// ============================================================
 // add_edge / close_edge
 // ============================================================
 
@@ -719,53 +670,6 @@ func (t *MergeEntityTool) Call(ctx context.Context, params json.RawMessage) (any
 }
 
 // ============================================================
-// set_version
-// ============================================================
-
-type SetVersionTool struct {
-	store *memory.Store
-}
-
-func NewSetVersionTool(s *memory.Store) *SetVersionTool { return &SetVersionTool{store: s} }
-
-func (t *SetVersionTool) Definition() mcp.ToolDefinition {
-	return mcp.ToolDefinition{
-		Name:           "set_version",
-		Description:    "Set an entity's current version (bi-temporal, superseding). The version is a STRING attribute — e.g. 'K2.6', '3.6', '2.3.0' — not a graph node. Setting a new version closes the prior one but keeps full history (queryable as-of a date). Use for model versions, software/dependency versions, app releases, etc. You can also set a version inline when declaring an entity in remember() via the entity's `version` field.",
-		RequiredScopes: []string{"write"},
-		InputSchema: map[string]any{
-			"type": "object",
-			"properties": map[string]any{
-				"entity":  map[string]any{"type": "string", "description": "Full record id (e.g. 'tool:kimi') or bare name (then set `type`)."},
-				"type":    map[string]any{"type": "string", "description": "Entity type when `entity` is a bare name."},
-				"version": map[string]any{"type": "string", "description": "The version label, e.g. 'K2.6', '3.6', '2.3.0'."},
-				"author":  map[string]any{"type": "string", "description": "<human-handle> | claude | <named-agent>"},
-			},
-			"required": []string{"entity", "version", "author"},
-		},
-	}
-}
-
-func (t *SetVersionTool) Call(ctx context.Context, params json.RawMessage) (any, error) {
-	var a struct {
-		Entity  string `json:"entity"`
-		Type    string `json:"type"`
-		Version string `json:"version"`
-		Author  string `json:"author"`
-	}
-	if err := json.Unmarshal(params, &a); err != nil {
-		return nil, fmt.Errorf("%w: invalid set_version params: %s", mcp.ErrUserFacing, err)
-	}
-	if a.Author == "" {
-		a.Author = "claude"
-	}
-	if err := t.store.SetVersion(ctx, a.Entity, memory.EntityType(a.Type), a.Version, a.Author); err != nil {
-		return nil, asUserFacing(err)
-	}
-	return map[string]any{"status": "ok", "entity": a.Entity, "version": a.Version}, nil
-}
-
-// ============================================================
 // Bulk registration
 // ============================================================
 
@@ -776,7 +680,6 @@ func RegisterMemoryTools(registry *mcp.Registry, store *memory.Store) {
 	registry.Register(NewRememberTool(store))
 	registry.Register(NewRecallTool(store))
 	registry.Register(NewOrientTool(store))
-	registry.Register(NewEditNotesTool(store))
 	registry.Register(NewAddEdgeTool(store))
 	registry.Register(NewCloseEdgeTool(store))
 	registry.Register(NewListEntitiesTool(store))
@@ -788,5 +691,4 @@ func RegisterMemoryTools(registry *mcp.Registry, store *memory.Store) {
 	registry.Register(NewDemoteTool(store))
 	registry.Register(NewForgetTool(store))
 	registry.Register(NewMergeEntityTool(store))
-	registry.Register(NewSetVersionTool(store))
 }

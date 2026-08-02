@@ -11,7 +11,6 @@ import (
 
 	"github.com/jasondostal/rill/internal/auth"
 	"github.com/jasondostal/rill/internal/mcp"
-	"github.com/jasondostal/rill/internal/mcp/tools"
 )
 
 func TestInitialize(t *testing.T) {
@@ -68,162 +67,37 @@ func TestToolsList(t *testing.T) {
 	if !ok {
 		t.Fatal("expected tools array")
 	}
-	if len(toolList) != 3 {
-		t.Errorf("expected 3 tools (discover + load + test_write), got %d", len(toolList))
+	if len(toolList) != 1 {
+		t.Errorf("expected 1 tool (test_write), got %d", len(toolList))
 	}
 }
 
-func TestRillDiscover(t *testing.T) {
+func TestToolsListFullSchemas(t *testing.T) {
 	h := setupHandler()
-	rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"discover","arguments":{}}}`)
+	rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
 
 	var resp mcp.Response
 	mustDecode(t, rec, &resp)
 
-	content := extractContent(t, resp)
-	var discoverResult struct {
-		Tools []mcp.DiscoverEntry `json:"tools"`
+	result, ok := resp.Result.(map[string]any)
+	if !ok {
+		t.Fatal("expected result map")
 	}
-	if err := json.Unmarshal([]byte(content), &discoverResult); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
+	toolList, ok := result["tools"].([]any)
+	if !ok || len(toolList) == 0 {
+		t.Fatal("expected non-empty tools array")
 	}
-
-	if len(discoverResult.Tools) < 2 {
-		t.Errorf("expected at least 2 tools in discover, got %d", len(discoverResult.Tools))
-	}
-
-	names := make(map[string]bool)
-	for _, tool := range discoverResult.Tools {
-		names[tool.Name] = true
-	}
-	for _, name := range []string{"discover", "load"} {
-		if !names[name] {
-			t.Errorf("expected %s in discover results", name)
-		}
-	}
-}
-
-func TestRillLoad(t *testing.T) {
-	h := setupHandler()
-	rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load","arguments":{"tool":"discover"}}}`)
-
-	var resp mcp.Response
-	mustDecode(t, rec, &resp)
-
-	content := extractContent(t, resp)
-	var def mcp.ToolDefinition
-	if err := json.Unmarshal([]byte(content), &def); err != nil {
-		t.Fatalf("unmarshal failed: %v", err)
-	}
-
-	if def.Name != "discover" {
-		t.Errorf("expected name 'rill_discover', got '%s'", def.Name)
-	}
-	if def.Description == "" {
-		t.Error("expected non-empty description")
-	}
-}
-
-func TestRillLoadUnknownTool(t *testing.T) {
-	h := setupHandler()
-	rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"load","arguments":{"tool":"nonexistent"}}}`)
-
-	var errResp mcp.Error
-	mustDecode(t, rec, &errResp)
-
-	if errResp.Error.Code == 0 {
-		t.Error("expected error for unknown tool")
-	}
-}
-
-func TestToolsListCompact(t *testing.T) {
-	t.Run("compact", func(t *testing.T) {
-		h := setupHandlerOpts(mcp.HandlerOpts{CompactTools: true})
-		rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-
-		var resp mcp.Response
-		mustDecode(t, rec, &resp)
-
-		result, ok := resp.Result.(map[string]any)
+	for i, entry := range toolList {
+		tool, ok := entry.(map[string]any)
 		if !ok {
-			t.Fatal("expected result map")
+			t.Fatalf("tool[%d] is not a map", i)
 		}
-		toolList, ok := result["tools"].([]any)
-		if !ok || len(toolList) == 0 {
-			t.Fatal("expected non-empty tools array")
+		if _, hasDesc := tool["description"]; !hasDesc {
+			t.Errorf("tool[%d] missing description — tools/list must always return full definitions", i)
 		}
-		for i, entry := range toolList {
-			tool, ok := entry.(map[string]any)
-			if !ok {
-				t.Fatalf("tool[%d] is not a map", i)
-			}
-			if _, hasSchema := tool["inputSchema"]; hasSchema {
-				t.Errorf("tool[%d] has inputSchema in compact mode", i)
-			}
+		if _, hasSchema := tool["inputSchema"]; !hasSchema {
+			t.Errorf("tool[%d] missing inputSchema — tools/list must always return full definitions", i)
 		}
-	})
-
-	t.Run("names_only", func(t *testing.T) {
-		h := setupHandlerOpts(mcp.HandlerOpts{NamesOnly: true})
-		rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-
-		var resp mcp.Response
-		mustDecode(t, rec, &resp)
-
-		result, ok := resp.Result.(map[string]any)
-		if !ok {
-			t.Fatal("expected result map")
-		}
-		toolList, ok := result["tools"].([]any)
-		if !ok || len(toolList) == 0 {
-			t.Fatal("expected non-empty tools array")
-		}
-		for i, entry := range toolList {
-			tool, ok := entry.(map[string]any)
-			if !ok {
-				t.Fatalf("tool[%d] is not a map", i)
-			}
-			if _, hasDesc := tool["description"]; hasDesc {
-				t.Errorf("tool[%d] has description in names-only mode", i)
-			}
-			if _, hasSchema := tool["inputSchema"]; hasSchema {
-				t.Errorf("tool[%d] has inputSchema in names-only mode", i)
-			}
-		}
-	})
-
-	t.Run("default_full", func(t *testing.T) {
-		h := setupHandler()
-		rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/list"}`)
-
-		var resp mcp.Response
-		mustDecode(t, rec, &resp)
-
-		result, ok := resp.Result.(map[string]any)
-		if !ok {
-			t.Fatal("expected result map")
-		}
-		toolList, ok := result["tools"].([]any)
-		if !ok || len(toolList) == 0 {
-			t.Fatal("expected non-empty tools array")
-		}
-		first := toolList[0].(map[string]any)
-		if _, hasDesc := first["description"]; !hasDesc {
-			t.Error("expected description in default mode")
-		}
-		if _, hasSchema := first["inputSchema"]; !hasSchema {
-			t.Error("expected inputSchema in default mode")
-		}
-	})
-}
-
-func TestDiscoverTokenBudget(t *testing.T) {
-	h := setupHandler()
-	rec := call(t, h, `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"discover","arguments":{}}}`)
-
-	bodyLen := rec.Body.Len()
-	if bodyLen > 8000 {
-		t.Errorf("discover response too large: %d bytes (should be under ~8K for 2K token budget)", bodyLen)
 	}
 }
 
@@ -233,8 +107,6 @@ func setupHandler() *mcp.Handler {
 
 func setupHandlerOpts(opts mcp.HandlerOpts) *mcp.Handler {
 	reg := mcp.NewRegistry()
-	reg.Register(tools.NewDiscoverTool(reg))
-	reg.Register(tools.NewLoadTool(reg))
 	// Register a test tool that requires write scope for scope enforcement tests.
 	reg.Register(&testWriteTool{})
 	return mcp.NewHandler(reg, opts)

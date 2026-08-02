@@ -4,6 +4,23 @@ All notable changes to Rill are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.0] — MCP surface trim
+
+Tool-surface cleanup after an in-anger usage review: keep tools that are the
+only way to do something; cut tools that overlap a better one.
+
+### Removed
+- **`discover` / `load` meta-tools** — rill's own progressive-disclosure layer
+  predated harnesses doing deferred tool loading natively; now it's a second
+  layer of indirection nothing invokes. `tools/list` always returns full
+  definitions (standard MCP). The `RILL_COMPACT_TOOLS` modes are gone with it —
+  a compact list with no `load` would strand clients.
+- **`set_version`** — pure sugar over `add_edge` with the `version_is`
+  predicate, which is exclusive and already supersedes correctly. The store
+  function, REST surface, and remember-inline `version` field are unchanged.
+- **`edit_notes`** — hand_notes is the human-curated voice; the web UI (and
+  REST/CLI) is the right pen for it, not an agent tool.
+
 ## [0.3.0] — Orient v2
 
 Four additions to `orient`, rill's boot-context render, aimed at making it a

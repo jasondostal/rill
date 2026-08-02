@@ -12,16 +12,10 @@ import (
 	"github.com/jasondostal/rill/internal/memory"
 )
 
-// HandlerOpts controls MCP handler behavior.
-type HandlerOpts struct {
-	// CompactTools causes tools/list to return name + description only,
-	// omitting input schemas. Clients are expected to call load to fetch
-	// a tool's full schema before invoking it.
-	CompactTools bool
-	// NamesOnly causes tools/list to return only tool names. Forces the
-	// client to call load for description AND schema. ~10 tokens per tool.
-	NamesOnly bool
-}
+// HandlerOpts controls MCP handler behavior. Empty today — the compact-tools
+// modes died with the discover/load meta-tools (modern harnesses defer tool
+// schemas themselves; a compact list with no load would strand clients).
+type HandlerOpts struct{}
 
 // Handler dispatches MCP JSON-RPC requests to the tool registry.
 type Handler struct {
@@ -95,7 +89,7 @@ func (h *Handler) handleInitialize(_ json.RawMessage) (any, error) {
 		"protocolVersion": "2024-11-05",
 		"serverInfo": map[string]string{
 			"name":    "rill",
-			"version": "0.3.0",
+			"version": "0.4.0",
 		},
 		"capabilities": map[string]any{
 			"tools": map[string]bool{},
@@ -108,17 +102,13 @@ func (h *Handler) handleToolsList() (any, error) {
 	defs := make([]map[string]any, len(tools))
 	for i, t := range tools {
 		entry := map[string]any{
-			"name": t.Name,
+			"name":        t.Name,
+			"description": t.Description,
 		}
-		if !h.opts.NamesOnly {
-			entry["description"] = t.Description
-		}
-		if !h.opts.CompactTools && !h.opts.NamesOnly {
-			if def, err := h.registry.Load(t.Name); err == nil {
-				entry["inputSchema"] = def.InputSchema
-			} else {
-				entry["inputSchema"] = map[string]any{"type": "object"}
-			}
+		if def, err := h.registry.Load(t.Name); err == nil {
+			entry["inputSchema"] = def.InputSchema
+		} else {
+			entry["inputSchema"] = map[string]any{"type": "object"}
 		}
 		defs[i] = entry
 	}
