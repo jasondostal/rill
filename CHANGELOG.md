@@ -4,6 +4,22 @@ All notable changes to Rill are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.1] — CLI parity
+
+### Changed
+- `rill doc <id>` now fetches the document proper (metadata header + full
+  content, `--json` supported) instead of dumping the export.md rendering.
+- `rill doc-put` uses PATCH for updates (`--id`) and POST for creates, and
+  requires `--title` on both — matching the server's validation. Help text
+  now recommends `--file`/stdin over shell-substituted content (the
+  `$(cat ...)` corruption class).
+- `rill doc-delete` help notes the admin-scope requirement.
+
+### Removed
+- `rill set-version` — same redundancy as the MCP tool removed in 0.4.0:
+  `add-edge` with the exclusive `version_is` predicate covers it. The REST
+  endpoint stays for the web UI.
+
 ## [0.4.0] — MCP surface trim
 
 Tool-surface cleanup after an in-anger usage review: keep tools that are the

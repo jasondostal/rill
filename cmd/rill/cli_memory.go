@@ -25,7 +25,6 @@ func addMemoryCommands(root *cobra.Command) {
 	root.AddCommand(memPromoteCmd())
 	root.AddCommand(memDemoteCmd())
 	root.AddCommand(memMergeEntityCmd())
-	root.AddCommand(memSetVersionCmd())
 	root.AddCommand(memForgetCmd())
 	root.AddCommand(memEditNotesCmd())
 	root.AddCommand(memEditMemoryCmd())
@@ -406,43 +405,6 @@ Example:
 	cmd.Flags().BoolVar(&flagAllowCrossType, "allow-cross-type", false, "Permit merging across entity types (target must be a full record id)")
 	cmd.Flags().StringVar(&flagAuthor, "author", os.Getenv("USER"), "Author of this edit")
 	_ = cmd.MarkFlagRequired("target")
-	return cmd
-}
-
-// ---- set_version ----
-
-func memSetVersionCmd() *cobra.Command {
-	var (
-		flagType    string
-		flagVersion string
-		flagAuthor  string
-	)
-	cmd := &cobra.Command{
-		Use:   "set-version <entity-ref>",
-		Short: "Set an entity's current version label (bi-temporal; closes the prior)",
-		Args:  cobra.ExactArgs(1),
-		RunE: func(cmd *cobra.Command, args []string) error {
-			typ, slug, err := parseEntityRef(args[0], flagType)
-			if err != nil {
-				return err
-			}
-			body := map[string]any{"version": flagVersion}
-			if flagAuthor != "" {
-				body["author"] = flagAuthor
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-			defer cancel()
-			var out any
-			if err := newRESTClient().post(ctx, entityPath(typ, slug, "version"), body, &out); err != nil {
-				return err
-			}
-			return writeJSON(cmd.OutOrStdout(), out)
-		},
-	}
-	cmd.Flags().StringVar(&flagType, "type", "", "Entity type if ref isn't a full id")
-	cmd.Flags().StringVar(&flagVersion, "version", "", "Version label, e.g. '2.3.0' (required)")
-	cmd.Flags().StringVar(&flagAuthor, "author", os.Getenv("USER"), "Author of this edit")
-	_ = cmd.MarkFlagRequired("version")
 	return cmd
 }
 

@@ -89,7 +89,7 @@ func (h *Handler) handleInitialize(_ json.RawMessage) (any, error) {
 		"protocolVersion": "2024-11-05",
 		"serverInfo": map[string]string{
 			"name":    "rill",
-			"version": "0.4.0",
+			"version": "0.4.1",
 		},
 		"capabilities": map[string]any{
 			"tools": map[string]bool{},

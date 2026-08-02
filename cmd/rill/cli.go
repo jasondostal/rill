@@ -52,6 +52,11 @@ Common workflows:
   Curate:   rill promote person:alice --author alice
             rill demote person:alice --author alice
             rill forget memory:'2026...'
+            rill merge-entity tool:kimi-k2 --target tool:kimi --author alice
+  Docs:     rill docs                             # list documents
+            rill doc <id>                        # metadata header + full markdown
+            rill doc-put --title "Runbook" --file runbook.md --author alice
+            rill doc-delete <id>                 # admin scope required
   Search:   rill recall "what does alice work on" --k 5`,
 		SilenceErrors: true,
 		SilenceUsage:  true,

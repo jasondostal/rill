@@ -73,46 +73,65 @@ func docsListCmd() *cobra.Command {
 }
 
 func docShowCmd() *cobra.Command {
-	return &cobra.Command{
+	var flagJSON bool
+	cmd := &cobra.Command{
 		Use:   "doc <id>",
-		Short: "Print a document as markdown (frontmatter + body)",
+		Short: "Fetch one document: metadata header, then the full markdown content",
 		Args:  cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
-			raw, err := newRESTClient().getRaw(ctx, "/api/docs/"+url.PathEscape(bareDocID(args[0]))+"/export.md")
-			if err != nil {
+			var doc document.Document
+			if err := newRESTClient().get(ctx, "/api/docs/"+url.PathEscape(bareDocID(args[0])), &doc); err != nil {
 				return err
 			}
-			// #nosec G104 -- stdout write; if the pipe is closed the next op will fail.
-			_, _ = os.Stdout.Write(raw)
+			if flagJSON {
+				return writeJSON(cmd.OutOrStdout(), doc)
+			}
+			out := cmd.OutOrStdout()
+			fmt.Fprintf(out, "%s\n", doc.Title)
+			fmt.Fprintf(out, "  id:        %s\n", doc.ID)
+			fmt.Fprintf(out, "  doc_type:  %s\n", doc.DocType)
+			fmt.Fprintf(out, "  project:   %s\n", orDash(doc.Project))
+			fmt.Fprintf(out, "  source:    %s\n", orDash(doc.Source))
+			fmt.Fprintf(out, "  author:    %s\n", orDash(doc.Author))
+			fmt.Fprintf(out, "  created:   %s\n", doc.CreatedAt.UTC().Format(time.RFC3339))
+			fmt.Fprintf(out, "  updated:   %s\n", doc.UpdatedAt.UTC().Format(time.RFC3339))
+			fmt.Fprintf(out, "\n%s\n", doc.Content)
 			return nil
 		},
 	}
+	cmd.Flags().BoolVar(&flagJSON, "json", false, "Output JSON instead of human-readable")
+	return cmd
 }
 
 func docPutCmd() *cobra.Command {
 	var id, title, content, file, docType, project, source, author string
 	cmd := &cobra.Command{
 		Use:   "doc-put",
-		Short: "Create or update a single document (--id to update; content from --content, --file, or stdin)",
+		Short: "Create or update a single document (--id to update; content from --file or stdin)",
 		Long: `Create a document, or update one when --id is given. Mirrors the doc_put
-MCP tool / POST /api/docs.
+MCP tool: creates via POST /api/docs, updates via PATCH /api/docs/{id}.
 
 Content resolves in order: --content, then --file <path>, then piped stdin.
-Title is required when creating.
+--file is the recommended path — building document content via shell command
+substitution inside quotes (e.g. "$(cat notes.md)") has previously produced
+corrupted documents, so prefer --file or piping stdin.
+
+Title is required on both create AND update — the server validates it either
+way (a PATCH with no title is rejected same as a POST would be).
 
 Examples:
-  rill doc-put --title "Runbook" --file runbook.md --doc-type writeup
-  echo "# Notes" | rill doc-put --title Notes
-  rill doc-put --id document:20260101T000000Z --title "Runbook (v2)" --file runbook.md`,
+  rill doc-put --title "Runbook" --file runbook.md --doc-type writeup --author alice
+  echo "# Notes" | rill doc-put --title Notes --author alice
+  rill doc-put --id document:20260101T000000Z --title "Runbook (v2)" --file runbook.md --author alice`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			body, err := resolveDocContent(content, file, cmd.InOrStdin())
 			if err != nil {
 				return err
 			}
-			if id == "" && strings.TrimSpace(title) == "" {
-				return fmt.Errorf("--title is required when creating a document")
+			if strings.TrimSpace(title) == "" {
+				return fmt.Errorf("--title is required (the server validates it on update too, not just create)")
 			}
 			in := document.PutInput{
 				ID:      id,
@@ -126,7 +145,12 @@ Examples:
 			ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 			defer cancel()
 			var out document.Document
-			if err := newRESTClient().post(ctx, "/api/docs", in, &out); err != nil {
+			if id != "" {
+				err = newRESTClient().patch(ctx, "/api/docs/"+url.PathEscape(bareDocID(id)), in, &out)
+			} else {
+				err = newRESTClient().post(ctx, "/api/docs", in, &out)
+			}
+			if err != nil {
 				return err
 			}
 			fmt.Printf("%s\t%s\n", out.ID, out.Title)
@@ -134,10 +158,10 @@ Examples:
 		},
 	}
 	cmd.Flags().StringVar(&id, "id", "", "Document id to update (omit to create)")
-	cmd.Flags().StringVar(&title, "title", "", "Document title (required on create)")
+	cmd.Flags().StringVar(&title, "title", "", "Document title (required)")
 	cmd.Flags().StringVar(&content, "content", "", "Inline content (else --file or stdin)")
 	cmd.Flags().StringVar(&file, "file", "", "Read content from this file")
-	cmd.Flags().StringVar(&docType, "doc-type", "", "doc_type (e.g. writeup)")
+	cmd.Flags().StringVar(&docType, "doc-type", "writeup", "doc_type (e.g. writeup, primer, review, reference)")
 	cmd.Flags().StringVar(&project, "project", "", "project")
 	cmd.Flags().StringVar(&source, "source", "", "source label")
 	cmd.Flags().StringVar(&author, "author", os.Getenv("USER"), "author")
@@ -148,7 +172,9 @@ func docDeleteCmd() *cobra.Command {
 	return &cobra.Command{
 		Use:   "doc-delete <id>",
 		Short: "Soft-delete a document (recoverable via the UI restore)",
-		Args:  cobra.ExactArgs(1),
+		Long: `Soft-deletes a document (is_active = false). Recoverable via the UI restore.
+Requires a token with admin scope — unlike most mutations, which only need write.`,
+		Args: cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 			defer cancel()

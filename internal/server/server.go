@@ -179,7 +179,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{
 		"status":    "ok",
 		"db_status": map[bool]string{true: "connected", false: "disconnected"}[dbHealthy],
-		"version":   "0.4.0",
+		"version":   "0.4.1",
 		"name":      "rill",
 	})
 }
