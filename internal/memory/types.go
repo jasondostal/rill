@@ -12,6 +12,7 @@ package memory
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"time"
 )
@@ -128,6 +129,23 @@ var AllEdgeTables = []string{"works_on", "uses", "prefers", "works_at", "depends
 // Input payloads (caller-facing)
 // ============================================================
 
+// FlexBool is a bool that also accepts the string forms MCP clients commonly
+// send ("true"/"false"/"1"/"0") — caller-facing payload fields should prefer
+// it over bool so client serialization quirks don't reject a whole write.
+type FlexBool bool
+
+func (b *FlexBool) UnmarshalJSON(data []byte) error {
+	switch strings.ToLower(strings.Trim(string(data), `"`)) {
+	case "true", "1":
+		*b = true
+	case "false", "0", "", "null":
+		*b = false
+	default:
+		return fmt.Errorf("invalid boolean value %s", string(data))
+	}
+	return nil
+}
+
 // EntityDecl is a caller-declared entity in a remember() payload.
 type EntityDecl struct {
 	Name    string     `json:"name"`
@@ -169,7 +187,7 @@ type RememberPayload struct {
 	Author  string   `json:"author"` // <human-handle> | claude | <named-agent>
 	Project string   `json:"project,omitempty"`
 	Valence Valence  `json:"valence,omitempty"` // only for kind=preference
-	Open    bool     `json:"open,omitempty"`    // ★ mark this memory an open loop; opened_at = created_at
+	Open    FlexBool `json:"open,omitempty"`    // ★ mark this memory an open loop; opened_at = created_at
 
 	Entities []EntityDecl `json:"entities,omitempty"`
 	Edges    []EdgeDecl   `json:"edges,omitempty"`
