@@ -35,7 +35,7 @@ jobs:
           # In-memory storage: tests don't need persistence and we avoid the
           # writable-volume requirement of surrealkv/rocksdb.
           docker run -d --name surreal -p 8000:8000 \
-            surrealdb/surrealdb:v3.0.5 \
+            surrealdb/surrealdb:v3.2.5 \
             start --bind 0.0.0.0:8000 --user root --pass root --log info memory
           # Give SurrealDB a moment to start, then poll /health.
           for i in $(seq 1 30); do

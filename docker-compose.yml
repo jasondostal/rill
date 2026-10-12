@@ -17,7 +17,7 @@ services:
     restart: "no"
 
   surrealdb:
-    image: surrealdb/surrealdb:v3.0.5
+    image: surrealdb/surrealdb:v3.2.5
     # Bind to loopback only. Rill talks to SurrealDB over the compose network
     # via the "surrealdb" service hostname, so 0.0.0.0 exposure was unnecessary
     # and let anyone on the LAN open a websocket to the root account.

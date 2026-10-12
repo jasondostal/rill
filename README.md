@@ -37,7 +37,7 @@ Open http://localhost:5173/ — dashboard with memory growth chart, stats, and c
 ```yaml
 services:
   surrealdb:
-    image: surrealdb/surrealdb:v3.0.5
+    image: surrealdb/surrealdb:v3.2.5
     ports: ["8000:8000"]
     command: start --user root --pass root surrealkv://data
     volumes: [surreal_data:/data]
