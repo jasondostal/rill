@@ -4,6 +4,49 @@ All notable changes to Rill are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/), and the project aims to follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.4.2] — Security: OAuth consent, setup gate, client IPs
+
+Three fixes from a code review. If you run Rill behind a reverse proxy with
+OIDC enabled, or in local mode behind a trusted proxy, upgrade.
+
+### Security
+- **MCP OAuth now asks before it authorizes.** `/oauth/authorize` used to
+  redirect straight to the OIDC provider. Client registration is open, so
+  anyone could register a client with their own `redirect_uri` and send a
+  signed-in person a link: a live SSO session completed the flow with no
+  prompt and the authorization code went to the attacker. Rill now shows a
+  consent page naming the client and the host the access is going to, and
+  only an approval from that same browser (form token + `SameSite=Strict`
+  cookie) continues to the provider. `/oauth/callback` refuses any request
+  that was not approved.
+- **`RILL_OAUTH_REDIRECT_HOSTS`** (new, optional): comma-separated hosts a
+  client's `redirect_uri` may use, e.g. `claude.ai`. Enforced at registration
+  and at authorize, so it also retires clients registered before it was set.
+  Unset keeps the old behaviour (any HTTPS, non-loopback host).
+- **Setup can only ever create the first user.** `POST /api/auth/setup` did
+  not check whether an account already existed; it relied on the
+  localhost-only gate alone.
+- **Client IP no longer comes from the caller.** Behind a trusted proxy the
+  source IP was read from the leftmost `X-Forwarded-For` entry, which is the
+  part the client controls. Sending `X-Forwarded-For: 127.0.0.1` passed the
+  setup gate, and any value dodged per-IP rate limits and wrote a false
+  address to the audit log. The header is now read from the right, skipping
+  trusted proxies.
+- `/oauth/*` is rate-limited per IP.
+
+### Fixed
+- `/oauth/authorize` returned 500 on databases created before the
+  `authentik_*` → `oidc_*` field rename: the old required
+  `authentik_code_verifier` field was still defined, so the pending-auth
+  insert was rejected. New MCP clients could not connect. The leftover fields
+  are now removed on start.
+
+### Upgrade notes
+- Schema: three optional fields on `oauth2_pending_auths`, added on start;
+  two obsolete ones removed.
+- MCP clients that are already connected keep working (tokens and refresh are
+  untouched). Connecting a new client now includes one Approve click.
+
 ## [0.4.1] — CLI parity
 
 ### Changed

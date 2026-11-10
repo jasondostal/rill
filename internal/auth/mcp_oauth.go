@@ -11,6 +11,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"time"
 
@@ -69,16 +70,53 @@ type MCPOAuthManager struct {
 	oidcClient *OIDCClient
 	oidcCfg    OIDCConfig
 	publicURL  string
+	// redirectHosts, when non-empty, is the only set of hosts a client's
+	// redirect_uri may point at (RILL_OAUTH_REDIRECT_HOSTS). Empty = any
+	// HTTPS non-loopback host, with the consent page as the safeguard.
+	redirectHosts []string
 }
 
 // NewMCPOAuthManager creates a new MCP OAuth manager.
 func NewMCPOAuthManager(d *db.DB, oidcClient *OIDCClient, oidcCfg OIDCConfig, publicURL string) *MCPOAuthManager {
 	return &MCPOAuthManager{
-		db:         d,
-		oidcClient: oidcClient,
-		oidcCfg:    oidcCfg,
-		publicURL:  strings.TrimRight(publicURL, "/"),
+		db:            d,
+		oidcClient:    oidcClient,
+		oidcCfg:       oidcCfg,
+		publicURL:     strings.TrimRight(publicURL, "/"),
+		redirectHosts: parseRedirectHosts(os.Getenv("RILL_OAUTH_REDIRECT_HOSTS")),
 	}
+}
+
+// parseRedirectHosts reads a comma-separated host allowlist ("claude.ai,
+// example.com"). Hosts are compared case-insensitively and exactly — no
+// wildcards, no subdomain matching.
+func parseRedirectHosts(v string) []string {
+	var hosts []string
+	for _, h := range strings.Split(v, ",") {
+		if h = strings.ToLower(strings.TrimSpace(h)); h != "" {
+			hosts = append(hosts, h)
+		}
+	}
+	return hosts
+}
+
+// redirectHostAllowed reports whether a redirect_uri's host passes the
+// operator's allowlist. With no allowlist configured everything passes.
+func (m *MCPOAuthManager) redirectHostAllowed(redirectURI string) bool {
+	if len(m.redirectHosts) == 0 {
+		return true
+	}
+	u, err := url.Parse(redirectURI)
+	if err != nil {
+		return false
+	}
+	host := strings.ToLower(u.Hostname())
+	for _, h := range m.redirectHosts {
+		if h == host {
+			return true
+		}
+	}
+	return false
 }
 
 // --- Client Registration (RFC 7591) ---
@@ -148,6 +186,10 @@ func (m *MCPOAuthManager) HandleRegister(w http.ResponseWriter, r *http.Request)
 		}
 		if u.Hostname() == "localhost" || u.Hostname() == "127.0.0.1" || u.Hostname() == "::1" {
 			writeValidationError(w, "redirect_uri cannot target localhost: "+uri, map[string]any{"field": "redirect_uris", "value": uri})
+			return
+		}
+		if !m.redirectHostAllowed(uri) {
+			writeValidationError(w, "redirect_uri host is not allowed by this server: "+uri, map[string]any{"field": "redirect_uris", "value": uri})
 			return
 		}
 	}
@@ -288,7 +330,17 @@ func (m *MCPOAuthManager) HandleWellKnownOAuthProtectedResource(w http.ResponseW
 // --- Authorization Endpoint ---
 
 // HandleAuthorize handles GET /oauth/authorize.
-// Validates client, stores pending auth state, redirects to the OIDC provider.
+// Validates the client, stores pending auth state, and shows the consent page.
+//
+// It deliberately does NOT go straight to the OIDC provider. Rill is an OAuth
+// proxy: every MCP client rides the one upstream client Rill is registered
+// as, and client registration is open. If this redirected upstream directly,
+// a person with a live SSO session would be bounced through the whole flow
+// without seeing anything, and the authorization code would land on whatever
+// redirect_uri the (possibly hostile) client registered — a link is all it
+// would take to hand a stranger a token. So a human has to look at who is
+// asking and where the code is going, and press a button, in the same browser
+// that will finish the flow (see HandleAuthorizeConfirm).
 func (m *MCPOAuthManager) HandleAuthorize(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		writeMethodNotAllowed(w)
@@ -327,6 +379,12 @@ func (m *MCPOAuthManager) HandleAuthorize(w http.ResponseWriter, r *http.Request
 		writeBadRequest(w, "invalid redirect_uri")
 		return
 	}
+	// Re-checked here, not only at registration, so tightening the allowlist
+	// also shuts out clients registered before it existed.
+	if !m.redirectHostAllowed(redirectURI) {
+		writeBadRequest(w, "redirect_uri host is not allowed by this server")
+		return
+	}
 
 	if codeChallengeMethod != "S256" {
 		writeBadRequest(w, "code_challenge_method must be S256")
@@ -347,8 +405,17 @@ func (m *MCPOAuthManager) HandleAuthorize(w http.ResponseWriter, r *http.Request
 		scopes = strings.Split(scope, " ")
 	}
 
+	// Consent binding: the token rides in the page's form, the cookie rides in
+	// the browser. Approval needs both, so someone who merely fetches this page
+	// themselves can't hand its token to another person's browser.
+	consentToken := generateToken("", 32)
+	consentCookie := generateToken("", 32)
+
 	expiresAt := time.Now().UTC().Add(10 * time.Minute)
 	data := map[string]any{
+		"consent_token_hash":           hashToken(consentToken),
+		"consent_cookie_hash":          hashToken(consentCookie),
+		"consented":                    false,
 		"rill_state":                   rillState,
 		"client_state":                 state,
 		"client_id":                    clientID,
@@ -365,12 +432,120 @@ func (m *MCPOAuthManager) HandleAuthorize(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Redirect to the OIDC provider with Rill's callback as the redirect_uri.
-	callbackURI := m.publicURL + "/oauth/callback"
-	authURL := m.oidcClient.AuthorizationURL(rillState, oidcVerifier, oidcNonce, callbackURI)
+	http.SetCookie(w, &http.Cookie{
+		Name:     consentCookieName,
+		Value:    consentCookie,
+		Path:     "/oauth/",
+		HttpOnly: true,
+		Secure:   isHTTPS(r),
+		SameSite: http.SameSiteStrictMode,
+		MaxAge:   600,
+	})
 
-	rilllog.Logger().Info("oauth authorize: redirecting to OIDC provider", "client_id", clientID)
-	http.Redirect(w, r, authURL, http.StatusFound)
+	redirectHost := redirectURI
+	if u, err := url.Parse(redirectURI); err == nil {
+		redirectHost = u.Host
+	}
+	rilllog.Logger().Info("oauth authorize: showing consent page", "client_id", clientID, "redirect_host", redirectHost)
+	renderOAuthPage(w, http.StatusOK, consentPageTmpl, map[string]any{
+		"ClientName":   client.ClientName,
+		"RedirectHost": redirectHost,
+		"Scopes":       scopes,
+		"ConsentToken": consentToken,
+	})
+}
+
+// HandleAuthorizeConfirm handles POST /oauth/authorize/confirm — the consent
+// page's Approve / Deny buttons. Only an approval made from the browser that
+// was shown the page (form token + cookie both match) sends the flow on to
+// the OIDC provider.
+func (m *MCPOAuthManager) HandleAuthorizeConfirm(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		writeMethodNotAllowed(w)
+		return
+	}
+	if err := r.ParseForm(); err != nil {
+		writeBadRequest(w, "invalid form data")
+		return
+	}
+	consentToken := r.PostFormValue("consent_token")
+	if consentToken == "" {
+		writeBadRequest(w, "missing consent token")
+		return
+	}
+
+	rows, err := m.db.Query(r.Context(),
+		"SELECT * FROM oauth2_pending_auths WHERE consent_token_hash = $hash LIMIT 1",
+		map[string]any{"hash": hashToken(consentToken)})
+	if err != nil || len(rows) == 0 {
+		writeBadRequest(w, "this authorization request is no longer valid — start again from the application")
+		return
+	}
+	pending := rows[0]
+	pendingID := db.RecordID(pending)
+	if exp := db.TimeField(pending, "expires_at"); exp.IsZero() || time.Now().After(exp) {
+		writeBadRequest(w, "this authorization request has expired — start again from the application")
+		return
+	}
+	if done, _ := pending["consented"].(bool); done {
+		writeBadRequest(w, "this authorization request was already answered")
+		return
+	}
+
+	cookie, cookieErr := r.Cookie(consentCookieName)
+	wantCookieHash := db.StrField(pending, "consent_cookie_hash")
+	if cookieErr != nil || wantCookieHash == "" ||
+		subtle.ConstantTimeCompare([]byte(hashToken(cookie.Value)), []byte(wantCookieHash)) != 1 {
+		rilllog.Logger().Warn("oauth consent: browser binding mismatch (rejected)", "client_id", db.StrField(pending, "client_id"))
+		writeForbidden(w, "this approval did not come from the browser that was asked — start again from the application")
+		return
+	}
+	http.SetCookie(w, &http.Cookie{
+		Name: consentCookieName, Value: "", Path: "/oauth/", HttpOnly: true,
+		Secure: isHTTPS(r), SameSite: http.SameSiteStrictMode, MaxAge: -1,
+	})
+
+	clientID := db.StrField(pending, "client_id")
+
+	if r.PostFormValue("action") != "approve" {
+		if pendingID != "" {
+			_, _ = m.db.QueryRecord(r.Context(), "DELETE %s", pendingID, nil)
+		}
+		rilllog.Logger().Info("oauth consent: denied", "client_id", clientID)
+		target := db.StrField(pending, "client_redirect_uri")
+		if u, err := url.Parse(target); err == nil {
+			q := u.Query()
+			q.Set("error", "access_denied")
+			q.Set("state", db.StrField(pending, "client_state"))
+			u.RawQuery = q.Encode()
+			target = u.String()
+		}
+		renderOAuthPage(w, http.StatusOK, continuePageTmpl, map[string]any{"URL": target, "Message": "Access denied. Returning to the application…"})
+		return
+	}
+
+	if pendingID == "" {
+		writeInternalError(w, "oauth_consent_pending_id", fmt.Errorf("pending auth has no record id"), "")
+		return
+	}
+	if _, err := m.db.QueryRecord(r.Context(), "UPDATE %s SET consented = true", pendingID, nil); err != nil {
+		writeInternalError(w, "oauth_consent_store", err, "")
+		return
+	}
+
+	// Now — and only now — go to the OIDC provider, with Rill's callback as
+	// the redirect_uri.
+	callbackURI := m.publicURL + "/oauth/callback"
+	authURL := m.oidcClient.AuthorizationURL(
+		db.StrField(pending, "rill_state"),
+		db.StrField(pending, "oidc_code_verifier"),
+		db.StrField(pending, "oidc_nonce"),
+		callbackURI)
+
+	rilllog.Logger().Info("oauth consent: approved, continuing to OIDC provider", "client_id", clientID)
+	// A page that forwards, not a 302: browsers apply the CSP form-action
+	// directive to redirects that follow a form post, and ours is 'self'.
+	renderOAuthPage(w, http.StatusOK, continuePageTmpl, map[string]any{"URL": authURL, "Message": "Approved. Continuing to sign-in…"})
 }
 
 // --- Callback Endpoint ---
@@ -410,6 +585,14 @@ func (m *MCPOAuthManager) HandleCallback(w http.ResponseWriter, r *http.Request)
 	// which would have let an expired state be consumed.
 	if exp := db.TimeField(pending, "expires_at"); !exp.IsZero() && time.Now().After(exp) {
 		writeBadRequest(w, "expired state")
+		return
+	}
+
+	// The person must have approved this client on the consent page. Without
+	// this, anything that learned a rill_state could skip the question.
+	if ok, _ := pending["consented"].(bool); !ok {
+		rilllog.Logger().Warn("oauth callback: pending auth was never approved (rejected)", "client_id", db.StrField(pending, "client_id"))
+		writeForbidden(w, "this authorization request was not approved")
 		return
 	}
 

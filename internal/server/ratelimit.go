@@ -2,12 +2,12 @@ package server
 
 import (
 	"context"
-	"net"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/jasondostal/rill/internal/auth"
 	"golang.org/x/time/rate"
 )
 
@@ -82,51 +82,11 @@ func (rl *RateLimiter) cleanup() {
 	}
 }
 
-// sourceIP extracts the client IP from the request, respecting X-Forwarded-For
-// when the request comes from a trusted proxy. When not behind a proxy, uses
-// RemoteAddr directly.
+// sourceIP extracts the client IP from the request, honoring X-Forwarded-For
+// only when the request comes from a trusted proxy, and then only the part of
+// it our proxies wrote (see auth.ResolveClientIP).
 func sourceIP(r *http.Request, trustedProxies []string) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-
-	// Only trust X-Forwarded-For from configured proxy IPs.
-	isTrusted := false
-	if len(trustedProxies) > 0 {
-		srcIP := net.ParseIP(host)
-		for _, cidr := range trustedProxies {
-			cidr = strings.TrimSpace(cidr)
-			if cidr == "" {
-				// Skip blank entries — an unset env var with a comma-split
-				// upstream can leave [""] in the trust list, which would
-				// otherwise crash net.ParseCIDR with no diagnostic.
-				continue
-			}
-			_, ipnet, err := net.ParseCIDR(cidr)
-			if err != nil {
-				if ip := net.ParseIP(cidr); ip != nil {
-					ipnet = &net.IPNet{IP: ip, Mask: net.CIDRMask(32, 32)}
-				} else {
-					continue
-				}
-			}
-			if ipnet.Contains(srcIP) {
-				isTrusted = true
-				break
-			}
-		}
-	}
-
-	if isTrusted {
-		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			parts := strings.Split(xff, ",")
-			if len(parts) > 0 {
-				return strings.TrimSpace(parts[0])
-			}
-		}
-	}
-	return host
+	return auth.ResolveClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), auth.ParseTrustedProxies(trustedProxies))
 }
 
 // RateLimitMiddleware returns a middleware that rate-limits requests.
@@ -141,6 +101,10 @@ func RateLimitMiddleware(mcpRL, loginRL, restRL *RateLimiter, trustedProxies []s
 				rl = loginRL
 			} else if r.URL.Path == "/mcp" || r.URL.Path == "/api/mcp" {
 				rl = mcpRL
+			} else if strings.HasPrefix(r.URL.Path, "/oauth/") {
+				// Unauthenticated by nature (client registration, the consent
+				// page, the token endpoint) and each call writes to the DB.
+				rl = restRL
 			} else if strings.HasPrefix(r.URL.Path, "/api/") &&
 				!strings.HasPrefix(r.URL.Path, "/api/auth/") {
 				rl = restRL

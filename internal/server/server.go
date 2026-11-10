@@ -68,6 +68,7 @@ func New(mcpHandler http.Handler, authMgr *auth.Manager, database *db.DB, memSto
 		s.mux.HandleFunc("GET /.well-known/oauth-protected-resource/mcp", mcpOAuthMgr.HandleWellKnownOAuthProtectedResource)
 		s.mux.HandleFunc("POST /oauth/register", mcpOAuthMgr.HandleRegister)
 		s.mux.HandleFunc("GET /oauth/authorize", mcpOAuthMgr.HandleAuthorize)
+		s.mux.HandleFunc("POST /oauth/authorize/confirm", mcpOAuthMgr.HandleAuthorizeConfirm)
 		s.mux.HandleFunc("GET /oauth/callback", mcpOAuthMgr.HandleCallback)
 		s.mux.HandleFunc("POST /oauth/token", mcpOAuthMgr.HandleToken)
 		s.mux.HandleFunc("POST /oauth/revoke", mcpOAuthMgr.HandleRevoke)
@@ -179,7 +180,7 @@ func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, status, map[string]any{
 		"status":    "ok",
 		"db_status": map[bool]string{true: "connected", false: "disconnected"}[dbHealthy],
-		"version":   "0.4.1",
+		"version":   "0.4.2",
 		"name":      "rill",
 	})
 }
@@ -295,6 +296,21 @@ func (s *Server) handleSetup(w http.ResponseWriter, r *http.Request) {
 			writeForbidden(w, "setup from remote networks is disabled. Set RILL_ALLOW_REMOTE_SETUP=1 to enable")
 			return
 		}
+	}
+
+	// Setup creates the FIRST account and nothing else. The source-IP gate
+	// above is one layer; this is the other, so a gate bypass can never add a
+	// second admin to a server that is already set up. Fails closed if the
+	// count can't be read.
+	countRows, err := s.authMgr.DB().Query(r.Context(),
+		"SELECT count() AS cnt FROM auth_user GROUP ALL", nil)
+	if err != nil {
+		writeInternalError(w, "setup_user_count", err, "")
+		return
+	}
+	if len(countRows) > 0 && db.IntField(countRows[0], "cnt") > 0 {
+		writeConflict(w, "setup is not available — a user already exists")
+		return
 	}
 
 	var req struct {

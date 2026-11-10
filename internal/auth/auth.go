@@ -331,23 +331,89 @@ func (m *Manager) EnsureToken(ctx context.Context) (*Token, error) {
 // gates (e.g. handleSetup). The raw r.RemoteAddr is wrong when behind a
 // reverse proxy — it's the proxy's IP, not the real client.
 func (m *Manager) SourceIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	return ResolveClientIP(r.RemoteAddr, r.Header.Get("X-Forwarded-For"), m.trustedProxies)
+}
+
+// ResolveClientIP works out the client address for a request from its TCP
+// peer (remoteAddr) and its X-Forwarded-For header.
+//
+// X-Forwarded-For is a list each proxy APPENDS to: "<whatever the client
+// sent>, <address proxy 1 saw>, <address proxy 2 saw>". Only the entries
+// written by our own proxies are trustworthy, and those are on the right.
+// So the list is read right-to-left, skipping addresses that are themselves
+// trusted proxies, and the first address that is not one is the client.
+// Reading the leftmost entry instead (as this code once did) lets any caller
+// pick their own source IP by sending the header themselves — which defeated
+// the localhost-only setup gate, the rate limiter and the audit log.
+//
+// When the peer is not a trusted proxy the header is ignored entirely. When
+// every entry is a trusted proxy (or the header is empty or malformed) the
+// answer is the nearest address we can vouch for, never one further left.
+func ResolveClientIP(remoteAddr, xff string, trusted []*net.IPNet) string {
+	host, _, err := net.SplitHostPort(remoteAddr)
 	if err != nil {
-		host = r.RemoteAddr
+		host = remoteAddr
 	}
-	if !m.isTrustedProxy(r) {
+	if !ipInNets(net.ParseIP(host), trusted) {
 		return host
 	}
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-		// XFF is a comma-separated list left-to-right: [client, proxy1, proxy2, ...].
-		// We only honor the leftmost (real client) when the request came from
-		// a trusted proxy. Multi-hop XFF chains beyond that are not validated.
-		if comma := strings.Index(xff, ","); comma > 0 {
-			return strings.TrimSpace(xff[:comma])
+	if xff == "" {
+		return host
+	}
+	parts := strings.Split(xff, ",")
+	for i := len(parts) - 1; i >= 0; i-- {
+		entry := strings.TrimSpace(parts[i])
+		ip := net.ParseIP(entry)
+		if ip == nil {
+			// Garbage in the chain: stop at the last address we could vouch for.
+			return host
 		}
-		return strings.TrimSpace(xff)
+		if !ipInNets(ip, trusted) {
+			return ip.String()
+		}
+		if i == len(parts)-1 {
+			// The rightmost entry is what our nearest proxy saw; it is the
+			// most a fully-trusted chain can tell us.
+			host = ip.String()
+		}
 	}
 	return host
+}
+
+// ParseTrustedProxies parses a list of IPs / CIDRs, skipping blanks and
+// anything unparseable.
+func ParseTrustedProxies(entries []string) []*net.IPNet {
+	var nets []*net.IPNet
+	for _, e := range entries {
+		e = strings.TrimSpace(e)
+		if e == "" {
+			continue
+		}
+		if _, ipnet, err := net.ParseCIDR(e); err == nil {
+			nets = append(nets, ipnet)
+			continue
+		}
+		if ip := net.ParseIP(e); ip != nil {
+			if ip4 := ip.To4(); ip4 != nil {
+				nets = append(nets, &net.IPNet{IP: ip4, Mask: net.CIDRMask(32, 32)})
+			} else {
+				nets = append(nets, &net.IPNet{IP: ip, Mask: net.CIDRMask(128, 128)})
+			}
+		}
+	}
+	return nets
+}
+
+func ipInNets(ip net.IP, nets []*net.IPNet) bool {
+	if ip == nil {
+		return false
+	}
+	for _, n := range nets {
+		if n.Contains(ip) {
+			return true
+		}
+	}
+	return false
 }
 
 // isTrustedProxy returns true if the request originates from a trusted reverse proxy IP.

@@ -488,6 +488,17 @@ DEFINE FIELD IF NOT EXISTS oidc_code_verifier           ON oauth2_pending_auths 
 DEFINE FIELD IF NOT EXISTS oidc_nonce                   ON oauth2_pending_auths TYPE option<string>;
 DEFINE FIELD IF NOT EXISTS scopes                       ON oauth2_pending_auths TYPE array<string>;
 DEFINE FIELD IF NOT EXISTS expires_at                   ON oauth2_pending_auths TYPE datetime;
+-- Databases created before the authentik_* -> oidc_* rename still carry the
+-- old REQUIRED string field, which made every new pending-auth insert fail
+-- ("Expected `string` but found `NONE`") and so broke /oauth/authorize.
+REMOVE FIELD IF EXISTS authentik_code_verifier ON oauth2_pending_auths;
+REMOVE FIELD IF EXISTS authentik_nonce         ON oauth2_pending_auths;
+-- Consent step (0.4.2): the pending request is only sent on to the OIDC
+-- provider after a person approves it on the consent page, from the browser
+-- holding the matching cookie.
+DEFINE FIELD IF NOT EXISTS consent_token_hash           ON oauth2_pending_auths TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS consent_cookie_hash          ON oauth2_pending_auths TYPE option<string>;
+DEFINE FIELD IF NOT EXISTS consented                    ON oauth2_pending_auths TYPE option<bool>;
 DEFINE INDEX IF NOT EXISTS oauth2_pending_state ON oauth2_pending_auths FIELDS rill_state UNIQUE;
 
 DEFINE TABLE IF NOT EXISTS oauth2_auth_codes SCHEMAFULL;
