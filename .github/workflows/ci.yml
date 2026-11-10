@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"] # release: publishes ghcr.io/<repo>:<version>
   pull_request:
     branches: [main]
   schedule:
@@ -135,15 +136,29 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Image tags
+        id: tags
+        # A v* tag publishes the version (v0.4.2 -> :0.4.2); everything
+        # else keeps publishing :main and :latest. Both publish the sha.
+        run: |
+          repo="ghcr.io/${GITHUB_REPOSITORY}"
+          {
+            echo "tags<<EOF"
+            echo "${repo}:${GITHUB_SHA}"
+            if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
+              echo "${repo}:${GITHUB_REF_NAME#v}"
+            else
+              echo "${repo}:main"
+              echo "${repo}:latest"
+            fi
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
           context: .
           push: true
-          tags: |
-            ghcr.io/${{ github.repository }}:main
-            ghcr.io/${{ github.repository }}:${{ github.sha }}
-            ghcr.io/${{ github.repository }}:latest
+          tags: ${{ steps.tags.outputs.tags }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
       - uses: aquasecurity/trivy-action@v0.36.0
