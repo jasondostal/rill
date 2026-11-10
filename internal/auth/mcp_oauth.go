@@ -432,6 +432,7 @@ func (m *MCPOAuthManager) HandleAuthorize(w http.ResponseWriter, r *http.Request
 		return
 	}
 
+	// #nosec G124 -- Secure conditional on TLS is intentional; HttpOnly+SameSite set.
 	http.SetCookie(w, &http.Cookie{
 		Name:     consentCookieName,
 		Value:    consentCookie,
@@ -500,6 +501,7 @@ func (m *MCPOAuthManager) HandleAuthorizeConfirm(w http.ResponseWriter, r *http.
 		writeForbidden(w, "this approval did not come from the browser that was asked — start again from the application")
 		return
 	}
+	// #nosec G124 -- Secure conditional on TLS is intentional; HttpOnly+SameSite set.
 	http.SetCookie(w, &http.Cookie{
 		Name: consentCookieName, Value: "", Path: "/oauth/", HttpOnly: true,
 		Secure: isHTTPS(r), SameSite: http.SameSiteStrictMode, MaxAge: -1,
